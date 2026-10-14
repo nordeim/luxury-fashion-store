@@ -19,6 +19,13 @@ export async function toggleWishlistAction(productId: string): Promise<ActionRes
 
   const wishlistId = await getOrCreateWishlist(user?.id ?? null);
 
+  // H-42 (session-7): keep the parent row's `updatedAt` truthful so the K-1
+  // sweeper's "idle > 30d" predicate measures last ACTIVITY, not creation
+  // age. Best-effort — a failed touch must never fail the toggle.
+  const touch = db.wishlist
+    .update({ where: { id: wishlistId }, data: { updatedAt: new Date() } })
+    .catch(() => {});
+
   // F-3 (session-3): the delete/create toggle raced on the @@unique (two rapid
   // toggles, or toggle+merge) and threw P2002 across the seam. Resolve the
   // winner by existence inside a transaction, and map residual races to the
@@ -35,6 +42,7 @@ export async function toggleWishlistAction(productId: string): Promise<ActionRes
       await tx.wishlistItem.create({ data: { wishlistId, productId } });
       return true;
     });
+    await touch;
     revalidatePath("/", "layout");
     return ok({ wishlisted });
   } catch (error) {

@@ -57,15 +57,10 @@ export function StorefrontHome({ products }: { products: ProductCardData[] }) {
         viewAllHref="/shop?category=women"
         onQuickView={setQuickView}
       />
-      <ExclusiveDeals />
-      <ProductRowSection
-        kicker="UP TO 40% OFF"
-        title="Sale"
-        titleAccent="Items"
-        products={saleItems}
-        viewAllHref="/shop?sale=1"
-        onQuickView={setQuickView}
-      />
+      {/* P-9 (session-7): the reference absorbed the sale row INTO the deals
+          section (countdown + bento + a 4-col sale grid) — the standalone
+          "Sale Items" row is gone from the home. */}
+      <ExclusiveDeals products={saleItems} onQuickView={setQuickView} />
       <ProductRowSection
         kicker="MEN"
         title="Men's"

@@ -5,6 +5,9 @@
 // demo user, so the user cart may already hold lines from earlier specs.
 // Every assertion here is written against DELTAS or UI-visible reality —
 // never absolute counts.
+import { execSync } from "node:child_process";
+import path from "node:path";
+import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
 async function openDrawerWithItem(page: import("@playwright/test").Page) {
@@ -218,6 +221,57 @@ test.describe("guest cart merge at login", () => {
     // session (same fix), the next project's drawer specs saw two lines.
     // Every run returns to the canonical empty-bag state, whatever the
     // project order.
+    await emptyTheBag(page);
+    await expect(page.getByText("Your bag is empty")).toBeVisible();
+  });
+});
+
+// Session 7, H-39: the drawer's "+" stays ENABLED on a STALE DTO (rendered
+// while the product had stock, stock zeroed behind it) — the old action fired
+// its atomic increment BEFORE the sold-out guard, inflating the persisted
+// line on every click. The plan-driven executor must refuse growth on a
+// sold-out line (H-15: leave the line untouched; the checkout guard owns the
+// conversation).
+test.describe("sold-out adjust guard (customer session)", () => {
+  // Runs on the canonical JAMES session — no login of its own. The admin
+  // seam's in-spec logins already consume exactly the rate limiter's 10 per
+  // IP+email across the two projects (5 + 5), so this test drives the stock
+  // edit through SQL like the H-2 injection (fixture tooling — the behavior
+  // under test is the ADJUST action, not the admin form).
+  test("adjust refuses to grow a sold-out line (H-39)", async ({ page }) => {
+    test.setTimeout(60_000);
+    // SQL stock edit (H-2's fixture pattern — file-based db execute).
+    const e2eDb = path.resolve(process.cwd(), "db", "e2e.db");
+    const schema = path.resolve(process.cwd(), "prisma", "schema.prisma");
+    const sqlFile = path.resolve(process.cwd(), "tests", "e2e", ".h39-stock.sql");
+    const env = { ...process.env, DATABASE_URL: `file:${e2eDb}` };
+    const setStock = (n: number) => {
+      writeFileSync(sqlFile, `UPDATE "Product" SET stock = ${n} WHERE slug = 'wide-brim-felt-hat';`);
+      execSync(`npx prisma db execute --schema ${schema} --file ${sqlFile}`, { env, stdio: "pipe" });
+    };
+
+    // Bag the victim product and KEEP the drawer open on a stale DTO.
+    await page.goto("/product/wide-brim-felt-hat");
+    await page.locator("main").getByRole("button", { name: "Add to Bag" }).first().click();
+    await expect(page.getByTestId("cart-drawer")).toBeVisible();
+    const drawerQty = page.getByTestId("cart-drawer").getByTestId(/^qty-/).first();
+    await expect(drawerQty).toHaveText("1");
+
+    try {
+      // Zero the stock BEHIND the open drawer — the drawer never re-renders,
+      // so its "+" is still enabled (line.stock is the stale 5): exactly the
+      // stale-UI window the fix guards.
+      setStock(0);
+
+      // THE PIN: "+" on the sold-out line must not grow it. (Old build: the
+      // increment landed first and the DTO came back with 2.)
+      await page.getByTestId("cart-drawer").getByRole("button", { name: "Increase quantity" }).click();
+      await expect(drawerQty).toHaveText("1", { timeout: 10_000 });
+    } finally {
+      // Restore world (shared DB — later specs shop this product).
+      setStock(12);
+    }
+    // Cleanup discipline (H-24 class): james's bag returns to empty.
     await emptyTheBag(page);
     await expect(page.getByText("Your bag is empty")).toBeVisible();
   });

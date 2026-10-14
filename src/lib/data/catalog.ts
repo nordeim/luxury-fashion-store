@@ -333,8 +333,41 @@ export interface Deal {
 }
 
 // "Exclusive Deals" promo cards (featured big + 2 stacked).
+// P-9 (session-7): images re-measured against the live reference — the
+// accessories tile swapped to the reference's current photo.
 export const FEATURED_DEAL: Deal = {"kicker":"WOMEN'S EDIT","title":"Up to 40% Off","copy":"Premium eveningwear & resort","cta":"Shop Women","image":"https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=900&q=80","discount":"-40%","category":"women"};
-export const SECONDARY_DEALS: Deal[] = [{"kicker":"MEN'S EDIT","title":"Up to 30% Off","image":"https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?w=600&q=80","cta":"Shop Men","category":"men"},{"kicker":"ACCESSORIES","title":"Up to 35% Off","image":"https://images.unsplash.com/photo-1492707892479-7bc8d5a4ee93?w=600&q=80","cta":"Shop Accessories","category":"accessories"}];
+export const SECONDARY_DEALS: Deal[] = [{"kicker":"MEN'S EDIT","title":"Up to 30% Off","image":"https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?w=600&q=80","cta":"Shop Men","category":"men"},{"kicker":"ACCESSORIES","title":"Up to 35% Off","image":"https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=600&q=80","cta":"Shop Accessories","category":"accessories"}];
+
+// P-10 (session-7): color-name → swatch hex for the product-card swatch row.
+// The reference renders some chips border-only (transparent) — names missing
+// from this map degrade to exactly that. Tan's value is the reference's own
+// measured fill: rgb(210,180,140).
+export const COLOR_HEX: Record<string, string> = {
+  Black: "#171411",
+  Graphite: "#3a3a3a",
+  Charcoal: "#2f3438",
+  Smoke: "#8e8a86",
+  Navy: "#1f2a44",
+  Midnight: "#131b2e",
+  Forest: "#2d4a33",
+  Sage: "#9caf88",
+  Bordeaux: "#5f1a24",
+  Burgundy: "#6b1f2f",
+  Cognac: "#9a5b33",
+  Caramel: "#c68e3f",
+  Camel: "#c19a6b",
+  Tan: "#d2b48c",
+  Beige: "#d4c5a9",
+  Stone: "#b8afa4",
+  Oatmeal: "#d9cdb8",
+  Ecru: "#e8e0d2",
+  Ivory: "#f5f0e8",
+  Pearl: "#f4f0ee",
+  Crystal: "#e8e6e3",
+  Rose: "#e3b7b0",
+  "Rose Gold": "#d4a29c",
+  Sky: "#a8c4d8",
+};
 
 export const TRENDING_SEARCHES = ["Silk Gown", "Cashmere", "Tailored Blazer", "Leather Bag", "Accessories"];
 

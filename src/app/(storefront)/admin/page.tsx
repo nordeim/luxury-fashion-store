@@ -35,7 +35,9 @@ export default async function AdminPage() {
     // reads its own unfiltered count (the aggregate's where would filter it).
     db.order.aggregate({
       _sum: { total: true },
-      _count: true,
+      // H-46 (session-7): the aggregate's _count is intentionally NOT read —
+      // it would be filtered by the where below. The Orders KPI uses the
+      // dedicated unfiltered count() next to it (H-28).
       where: { status: { not: "cancelled" } },
     }),
     db.order.count(),

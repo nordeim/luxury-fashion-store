@@ -1,14 +1,18 @@
 "use client";
 
 // Product card — PARITY SURFACE (classes byte-identical to the reference,
-// measured live 2026-10-14). Structure:
+// re-measured live 2026-10-15, P-10 session-7: the card text stack is brand /
+// NAME / stroke stars+(89) / price+compareAt / COLOR SWATCHES — no "NEW" chip
+// anywhere; sale cards carry a `-{discount}%` red-500 chip top-left on the
+// image). Structure:
 //   div.group.relative
 //     div.relative.overflow-hidden.bg-secondary.aspect-[3/4].rounded-lg
 //       img (object-cover, duration-700 group-hover:scale-105)
 //       hover overlay bg-black/0 group-hover:bg-black/10 duration-500
+//       sale chip: -{discount}% (bg-red-500, top-3 left-3, square)
 //       hover action row: Add to Bag (flex-1) + quick-view (w-10 h-10)
 //       wishlist heart (top-3 right-3, w-9 h-9 rounded-full)
-//     div.mt-4: brand kicker / name / stars+reviews / price row
+//     div.mt-4: brand kicker / name / stroke stars+reviews / price row / swatches
 //
 // Working functionality (the reference's handlers are inert — registered
 // superset): Add to Bag posts a server action; the heart toggles the DB
@@ -20,6 +24,7 @@ import { useState, useTransition } from "react";
 import { useStore } from "@/components/store/store-provider";
 import { addToCartAction } from "@/lib/actions/cart";
 import { toggleWishlistAction } from "@/lib/actions/wishlist";
+import { COLOR_HEX } from "@/lib/data/catalog";
 import { formatCents } from "@/lib/money";
 import type { ProductCardData } from "@/lib/products";
 
@@ -67,7 +72,7 @@ export function ProductCard({ product, onQuickView }: ProductCardProps) {
   };
 
   return (
-    <div className="group relative">
+    <div className="group relative" data-product-card>
       <div className="relative overflow-hidden bg-secondary aspect-[3/4] rounded-lg">
         <Link href={`/product/${product.slug}`} aria-label={product.name}>
           <img
@@ -77,16 +82,19 @@ export function ProductCard({ product, onQuickView }: ProductCardProps) {
           />
         </Link>
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all duration-500 pointer-events-none" />
-        {product.tag && (
-          <span
-            className={`absolute top-3 left-3 text-[10px] tracking-[0.2em] uppercase px-2.5 py-1 font-montserrat font-medium ${
-              product.tag === "SALE" ? "bg-red-600 text-white" : "bg-primary text-primary-foreground"
-            }`}
-          >
-            {product.tag}
+        {/* P-10 (session-7): the reference's on-image chip is the DISCOUNT
+            (-32%, red-500, square) — not the word "SALE", and isNew products
+            carry no chip at all (re-measured on New Arrivals + the sale
+            grid). */}
+        {onSale && (
+          <span className="absolute top-3 left-3 bg-red-500 text-white text-[10px] font-montserrat font-medium px-2 py-0.5">
+            -{product.discount}%
           </span>
         )}
-        <div className="absolute bottom-3 left-3 right-3 flex gap-2 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300">
+        {/* H-48 (session-7): focus-within reveal — the focus trap restores
+            focus to the opener (the eye button); without this the focused
+            control stays invisible until hover. Resting visuals unchanged. */}
+        <div className="absolute bottom-3 left-3 right-3 flex gap-2 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0 transition-all duration-300">
           <button
             type="button"
             onClick={addToBag}
@@ -131,23 +139,39 @@ export function ProductCard({ product, onQuickView }: ProductCardProps) {
         </h3>
         <div className="flex items-center gap-1.5 mb-2">
           <div className="flex items-center" aria-hidden="true">
+            {/* P-10: the reference's stars are 16px STROKE glyphs in
+                muted-foreground — no fill distinction, no gold. */}
             {[1, 2, 3, 4, 5].map((i) => (
-              <Star
-                key={i}
-                className={`w-3 h-3 ${i <= Math.round(product.rating) ? "fill-accent text-accent" : "text-border"}`}
-              />
+              <Star key={i} className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
             ))}
           </div>
-          <span className="text-xs text-muted-foreground font-montserrat">({product.reviewCount})</span>
+          <span className="text-[10px] text-muted-foreground font-montserrat">({product.reviewCount})</span>
         </div>
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-center gap-2 mb-3">
           <span className="font-sans text-base font-semibold text-foreground">{formatCents(product.price)}</span>
           {onSale && (
-            <span className="font-sans text-xs text-muted-foreground line-through">
+            <span className="font-sans text-sm text-muted-foreground line-through">
               {formatCents(product.compareAtPrice ?? 0)}
             </span>
           )}
         </div>
+        {/* P-10: the color swatch row — w-4 h-4 border chips filled from the
+            product's colors (names → hex via the catalog map; unknown names
+            render border-only, exactly like the reference's transparent
+            chips). */}
+        {product.colors.length > 0 && (
+          <div className="flex items-center gap-1.5 mb-3">
+            {product.colors.slice(0, 5).map((color) => (
+              <span
+                key={color}
+                title={color}
+                aria-label={`Color ${color}`}
+                className="w-4 h-4 rounded-full border border-border hover:scale-125 transition-transform"
+                style={{ backgroundColor: COLOR_HEX[color] ?? "transparent" }}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

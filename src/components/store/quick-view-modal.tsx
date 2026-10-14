@@ -23,7 +23,16 @@ export function QuickViewModal({ product, onClose }: { product: ProductCardData 
   const [sizedForId, setSizedForId] = useState<string | null>(null);
   // H-6 (session-5): action failures surface here, not as silent no-ops.
   const [actionError, setActionError] = useState<string | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  // H-43 (session-7): parents pass a fresh inline `() => setQuickView(null)` —
+  // keeping `onClose` in the trap effect's deps would tear down and reinstall
+  // the trap on every parent re-render mid-open (re-focusing the close
+  // button, capturing a wrong `previouslyFocused`). Latest-ref keeps the
+  // effect stable: deps are just the open/close of `product`.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   // Reset the size selection when a different product opens (adjust-during-render —
   // no effect needed; React re-renders immediately after this setState).
@@ -35,19 +44,20 @@ export function QuickViewModal({ product, onClose }: { product: ProductCardData 
   useEffect(() => {
     if (!product) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
-    // H-26 (session-6): modal focus contract — focus enters the panel, Tab
+    // H-26 (session-6) + H-43 (session-7): modal focus contract — focus
+    // enters the CARD (the dialog proper, not the backdrop overlay), Tab
     // stays inside it, the opener regains focus on close.
-    const trap = panelRef.current ? installFocusTrap(panelRef.current) : null;
+    const trap = cardRef.current ? installFocusTrap(cardRef.current) : null;
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
       trap?.();
     };
-  }, [product, onClose]);
+  }, [product]);
 
   if (!product) return null;
 
@@ -86,9 +96,9 @@ export function QuickViewModal({ product, onClose }: { product: ProductCardData 
   };
 
   return (
-    <div ref={panelRef} className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={`Quick view ${product.name}`}>
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
-      <div className="relative bg-card max-w-3xl w-full grid md:grid-cols-2 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={`Quick view ${product.name}`}>
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => onCloseRef.current()} aria-hidden="true" />
+      <div ref={cardRef} className="relative bg-card max-w-3xl w-full grid md:grid-cols-2 shadow-2xl">
         <button
           type="button"
           aria-label="Close quick view"

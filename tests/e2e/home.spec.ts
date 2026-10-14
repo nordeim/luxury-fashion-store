@@ -12,6 +12,11 @@
 // Session-6 re-measure (P-8, same day, later capture): the reference
 // RE-ANCHORED slide 3 to the horizontal center with center-aligned copy
 // (slides 1–2 unchanged). Latest measurement wins — the pin below enforces it.
+//
+// Session-7 re-measure (P-9/P-10, 2026-10-15): the deals section became a
+// countdown + bento + inline sale grid (standalone Sale row absorbed); the
+// product card grew a name-adjacent swatch row, stroke stars, a -{discount}%
+// image chip and dropped the "NEW" chip. Pins below enforce all of it.
 import { expect, test } from "@playwright/test";
 
 test.describe("home", () => {
@@ -179,9 +184,123 @@ test.describe("home", () => {
     await expect(page.getByTestId("the-edit")).toBeVisible();
     await expect(page.getByTestId("exclusive-deals")).toBeVisible();
     await expect(page.getByTestId("styled-by-you")).toBeVisible();
+    // P-9 (session-7): the standalone Sale row is GONE — the sale grid lives
+    // inside exclusive-deals. Five rows remain.
     const rows = page.getByTestId("product-row");
-    await expect(rows).toHaveCount(6); // New Arrivals, Our, Women's, Sale, Men's, Fine
+    await expect(rows).toHaveCount(5); // New Arrivals, Our, Women's, Men's, Fine
     await expect(page.getByRole("heading", { name: "New Arrivals" })).toBeVisible();
+    // The sale area renders inside the deals section: heading + 6 sale cards.
+    const deals = page.getByTestId("exclusive-deals");
+    await expect(deals.getByRole("heading", { name: "Sale Items" })).toBeVisible();
+    await expect(deals.getByTestId("sale-grid").locator("[data-product-card]")).toHaveCount(6);
+  });
+
+  test("exclusive deals runs a live countdown, bento tiles and the sale grid (P-9)", async ({ page }) => {
+    await page.goto("/");
+    const deals = page.getByTestId("exclusive-deals");
+    // Countdown: three ink digit boxes over cormorant digits, ticking real
+    // seconds (the reference's own countdown is mount-relative and ticks —
+    // the clone matches the semantics, superset-documented).
+    const countdown = deals.getByTestId("sale-countdown");
+    await expect(countdown).toBeVisible();
+    // Digits carry their unit suffixes (08HRS:24MIN:00SEC). The server
+    // placeholder is 08:24:00 — real hydration starts the tick; poll until
+    // the text moves (2s window always catches a second flip once live).
+    const readCd = () => countdown.evaluate((el) => el.textContent ?? "");
+    const s0 = await readCd();
+    await expect.poll(readCd, { timeout: 10_000 }).not.toBe(s0); // real seconds elapsed
+    const s1 = await readCd();
+    expect(s1).toMatch(/\d{2}HRS:\d{2}MIN:\d{2}SEC/);
+    const boxes = await countdown.evaluate((el) => {
+      const parts = Array.from(el.querySelectorAll("div"));
+      const ink = parts.filter((d) => getComputedStyle(d).backgroundColor === "rgb(23, 20, 17)");
+      return { count: ink.length, w: ink.length ? Math.round(ink[0].getBoundingClientRect().width) : 0 };
+    });
+    expect(boxes.count).toBe(3);
+    expect(boxes.w).toBe(48);
+    // Bento: the featured deal + two stacked — the tall tile's h3 is 36px at
+    // desktop, the stacked ones 30px (both white on gradient).
+    await expect(deals.getByRole("heading", { name: "Up to 40% Off" })).toBeVisible();
+    await expect(deals.getByRole("heading", { name: "Up to 30% Off" })).toBeVisible();
+    await expect(deals.getByRole("heading", { name: "Up to 35% Off" })).toBeVisible();
+  });
+
+  test("sale grid is four equal fluid columns at desktop (P-9)", async ({ page }) => {
+    test.skip((page.viewportSize()?.width ?? 0) < 1024, "desktop-only pin");
+    await page.goto("/");
+    const grid = page.getByTestId("exclusive-deals").getByTestId("sale-grid");
+    await expect(grid).toBeVisible();
+    // Viewport-independent pin: 4 EQUAL columns (302px @1440, 282px @1280 —
+    // the number moves with the viewport, the structure does not).
+    const cols = await grid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" "));
+    expect(cols).toHaveLength(4);
+    expect(new Set(cols).size).toBe(1);
+    const card = grid.locator("[data-product-card]").first();
+    const box = await card.boundingBox();
+    expect(Math.round(box?.width ?? 0)).toBe(Math.round(parseFloat(cols[0])));
+  });
+
+  test("product cards render the reference text stack (P-10)", async ({ page }) => {
+    await page.goto("/");
+    const card = page.getByTestId("product-row").first().locator("[data-product-card]").first();
+    await expect(card).toBeVisible();
+    const stack = await card.evaluate((el) => {
+      // lucide tags each glyph with lucide-<name> — grab the STARS, not the
+      // hover-row's shopping-bag icon.
+      const star = el.querySelector("svg.lucide-star");
+      const review = Array.from(el.querySelectorAll("span")).find((s) => /^\(\d+\)$/.test(s.textContent ?? ""));
+      // The swatch chips carry title={color} — nothing else in the card does.
+      const swatches = Array.from(el.querySelectorAll("span[title]"));
+      const name = el.querySelector("h3");
+      return {
+        name: name ? name.textContent.trim() : null,
+        starW: star ? Math.round(star.getBoundingClientRect().width) : 0,
+        starColor: star ? getComputedStyle(star).color : null,
+        reviewSize: review ? getComputedStyle(review).fontSize : null,
+        swatchCount: swatches.length,
+        saleChip: Array.from(el.querySelectorAll("span")).some((s) => /^-\d+%$/.test(s.textContent ?? "")),
+        newChip: (el.textContent ?? "").includes("NEW"),
+      };
+    });
+    expect(stack.name).toBeTruthy();
+    expect(stack.starW).toBe(16);
+    expect(stack.starColor).toBe("rgb(126, 113, 103)"); // muted-foreground stroke, not gold
+    expect(stack.reviewSize).toBe("10px");
+    expect(stack.swatchCount).toBe(3);
+    // The first New Arrivals card is not on sale and isNew — reference shows
+    // NO chip at all (neither "NEW" nor a discount).
+    expect(stack.saleChip).toBe(false);
+    expect(stack.newChip).toBe(false);
+  });
+
+  test("sale cards carry the -{discount}% chip and a strikethrough compare-at (P-10)", async ({ page }) => {
+    await page.goto("/");
+    const deals = page.getByTestId("exclusive-deals");
+    const gown = deals.getByTestId("sale-grid").locator("[data-product-card]").first();
+    await expect(gown).toBeVisible();
+    const chip = gown.locator("span", { hasText: /^-\d+%$/ }).first();
+    await expect(chip).toHaveText("-32%");
+    // Tailwind v4 serializes its default palette in oklab (and this Chromium
+    // keeps that serialization even through canvas) — assert the TOKEN
+    // instead: probe elements carrying bg-red-500 / bg-red-600 serialize the
+    // same way, so equality pins the exact color identity.
+    const chipBg = await chip.evaluate((el) => {
+      const probe = (cls: string) => {
+        const n = document.createElement("span");
+        n.className = cls;
+        document.body.appendChild(n);
+        const bg = getComputedStyle(n).backgroundColor;
+        n.remove();
+        return bg;
+      };
+      const actual = getComputedStyle(el).backgroundColor;
+      return { is500: actual === probe("bg-red-500"), is600: actual === probe("bg-red-600") };
+    });
+    expect(chipBg.is500).toBe(true); // red-500 — not the old red-600 SALE word
+    expect(chipBg.is600).toBe(false);
+    const compareAt = gown.locator("span.line-through");
+    await expect(compareAt).toBeVisible();
+    await expect(compareAt).toHaveText("$4,200");
   });
 
   test("newsletter form accepts an email (API superset)", async ({ page }) => {

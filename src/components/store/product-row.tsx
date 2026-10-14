@@ -100,7 +100,6 @@ export function ProductRowSection({
           {products.map((product) => (
             <div
               key={product.id}
-              data-product-card
               className="w-[calc(50%-8px)] md:w-[calc(33.333%-16px)] lg:w-[280px] shrink-0 snap-start"
             >
               <ProductCard product={product} onQuickView={onQuickView} />

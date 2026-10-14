@@ -49,10 +49,16 @@ export function installFocusTrap(container: HTMLElement): () => void {
       first.focus();
     }
   };
-  container.addEventListener("keydown", onKey);
+  // H-41 (session-7): the listener lives on DOCUMENT, not the container.
+  // Keydown fires on the focused element and bubbles through ITS ancestors —
+  // a container-scoped listener never sees a Tab pressed while focus has
+  // escaped (removed node, programmatic focus), which left the
+  // `!container.contains(current)` recovery arms above dead code. At document
+  // level they work: any Tab fired while focus is outside pulls it back in.
+  document.addEventListener("keydown", onKey);
 
   return () => {
-    container.removeEventListener("keydown", onKey);
+    document.removeEventListener("keydown", onKey);
     previouslyFocused?.focus();
   };
 }

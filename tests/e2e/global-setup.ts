@@ -29,7 +29,6 @@ export default function globalSetup() {
   // The db/ directory is git-ignored — recreate it if a fresh clone omitted it.
   fs.mkdirSync(path.join(repoRoot, "db"), { recursive: true });
   run("npx", ["prisma", "db", "push", "--accept-data-loss", "--skip-generate"]);
-  run("npx", ["tsx", "prisma/seed.ts"]);
   // Session 5: reset TRANSIENT runtime state. The seed is idempotent
   // (upserts) but never removes rows created AFTER it — a previous run's
   // guest carts merged into the demo user made the next run's drawer specs
@@ -41,6 +40,9 @@ export default function globalSetup() {
   // would have broken at 200. Orders/items/events are wiped wholesale and
   // the (idempotent) seed re-runs to restore the 4 canonical orders, which
   // also makes absolute dashboard KPI pins deterministic (H-28).
+  // Session 7 (H-45): a single seed AFTER the wipe — the pre-wipe seed was
+  // pure wasted work (push creates the schema; the wipe cleans; the seed
+  // fills).
   const wipe = [
     `DELETE FROM "OrderItem";`,
     `DELETE FROM "OrderEvent";`,

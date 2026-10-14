@@ -145,6 +145,9 @@ test.describe("admin console (admin session)", () => {
 
       // …and after: Orders grew by exactly the 104 cancelled rows while
       // Revenue did not move a cent (cancelled ≠ revenue, H-28).
+      // H-47 (session-7): bit-identical Revenue is deterministic ONLY because
+      // the config pins fullyParallel:false + workers:1 — a parallel
+      // non-cancelled checkout would move Revenue mid-injection.
       const during = await kpis();
       expect(during.orderCount - before.orderCount).toBe(104);
       expect(during.revenue).toBe(before.revenue);

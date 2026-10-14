@@ -13,6 +13,7 @@ import { getCartDto, getOrCreateCart, type CartDto } from "@/lib/cart";
 import { cartAddSchema, cartDeltaSchema } from "@/lib/validation";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { isRecordNotFound, isUniqueViolation } from "@/lib/prisma-errors";
+import { planAdjustment, planCorrection } from "@/lib/adjust-plan";
 
 /**
  * Clamp for a requested quantity against available stock. 0 means the stock
@@ -23,6 +24,25 @@ import { isRecordNotFound, isUniqueViolation } from "@/lib/prisma-errors";
 function clampToStock(requested: number, stock: number): number {
   if (stock <= 0) return 0;
   return Math.max(1, Math.min(requested, stock));
+}
+
+/**
+ * H-42 (session-7): keep the parent row's `updatedAt` truthful so the K-1
+ * sweeper's "idle > 30d" predicate measures last ACTIVITY, not creation age
+ * (nothing else ever writes cart/wishlist rows — item mutations touch only
+ * the children). Best-effort: a failed touch must never fail the user's
+ * mutation (the row may have vanished mid-flight — a sweep or merge won).
+ */
+async function touchTransientParent(model: "cart" | "wishlist", id: string): Promise<void> {
+  try {
+    if (model === "cart") {
+      await db.cart.update({ where: { id }, data: { updatedAt: new Date() } });
+    } else {
+      await db.wishlist.update({ where: { id }, data: { updatedAt: new Date() } });
+    }
+  } catch {
+    // Non-critical by design — the sweeper's next hourly pass re-derives.
+  }
 }
 
 export async function addToCartAction(
@@ -97,6 +117,7 @@ export async function addToCartAction(
     return fail("We couldn't update your bag. Please try again.");
   }
 
+  await touchTransientParent("cart", cartId);
   revalidatePath("/", "layout");
   const dto = await getCartDto(user?.id ?? null);
   return ok(dto);
@@ -123,26 +144,44 @@ export async function adjustCartItemAction(
     return fail("Invalid quantity change.");
   }
 
-  // H-23 (session-6): the write is an ATOMIC delta — `increment` cannot lose a
-  // concurrent ±1 (the module header's invariant, previously implemented as a
-  // read-modify-write that could). Post-corrections run after the atomic step:
-  // delete at ≤ 0, clamp above stock. Both the write and the corrections
-  // tolerate the line vanishing mid-flight (a concurrent remove/checkout won
-  // the race) — P2025 means the caller's desired end-state already holds, so
-  // the action re-syncs the bag and returns ok instead of throwing a raw 500.
+  // H-23 (session-6) + H-39/H-40 (session-7): the write is a PLANNED atomic
+  // delta. `planAdjustment` refuses growth on a sold-out line BEFORE any write
+  // (the increment used to land first, violating H-15's "leave the line
+  // untouched" on a stale UI); `planCorrection` derives the post-write
+  // correction from the OBSERVED quantity, and the executor applies it
+  // conditionally (WHERE quantity = observed) so a concurrent ±1 that landed
+  // after our write is never erased. Both the write and the corrections
+  // tolerate the line vanishing mid-flight — P2025 means the caller's desired
+  // end-state already holds, so the action re-syncs the bag and returns ok
+  // instead of throwing a raw 500.
   try {
-    const updated = await db.cartItem.update({
-      where: { id: item.id },
-      data: { quantity: { increment: parsedDelta.data.delta } },
-      select: { quantity: true },
-    });
-    if (updated.quantity <= 0) {
-      await db.cartItem.delete({ where: { id: item.id } });
-    } else if (item.product.stock <= 0) {
-      // H-15 (session-5): stock is gone — leave the line untouched (the
-      // checkout stock guard surfaces it) instead of writing the clamp's 0.
-    } else if (updated.quantity > item.product.stock) {
-      await db.cartItem.update({ where: { id: item.id }, data: { quantity: item.product.stock } });
+    const plan = planAdjustment(parsedDelta.data.delta, item.product.stock);
+    if (plan.kind === "increment") {
+      const updated = await db.cartItem.update({
+        where: { id: item.id },
+        data: { quantity: { increment: plan.delta } },
+        select: { quantity: true },
+      });
+      const correction = planCorrection(updated.quantity, item.product.stock);
+      if (correction.kind === "delete") {
+        // H-40: conditional — a concurrent increment landing after ours
+        // changes `quantity` away from the observed value and survives.
+        await db.cartItem.deleteMany({ where: { id: item.id, quantity: updated.quantity } });
+      } else if (correction.kind === "clamp") {
+        // H-40: clamp against FRESH stock (the pre-read may be stale); a
+        // fresh sellout leaves the line for the checkout guard (H-15).
+        const fresh = await db.product.findUnique({ where: { id: item.productId }, select: { stock: true } });
+        const freshStock = fresh?.stock ?? 0;
+        if (freshStock > 0) {
+          const capped = Math.min(updated.quantity, freshStock);
+          if (capped !== updated.quantity) {
+            await db.cartItem.updateMany({
+              where: { id: item.id, quantity: updated.quantity },
+              data: { quantity: capped },
+            });
+          }
+        }
+      }
     }
   } catch (error) {
     if (isRecordNotFound(error)) {
@@ -152,6 +191,7 @@ export async function adjustCartItemAction(
     throw error;
   }
 
+  await touchTransientParent("cart", item.cartId);
   revalidatePath("/", "layout");
   const dto = await getCartDto(user?.id ?? null);
   return ok(dto);
@@ -180,6 +220,7 @@ export async function removeCartItemAction(itemId: string): Promise<ActionResult
     }
     throw error;
   }
+  await touchTransientParent("cart", item.cartId);
   revalidatePath("/", "layout");
   const dto = await getCartDto(user?.id ?? null);
   return ok(dto);

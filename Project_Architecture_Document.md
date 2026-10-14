@@ -181,7 +181,7 @@ luxury-fashion-store/
     │   ├── not-found.tsx       ← measured 404 card
     │   ├── (auth)/login|register/page.tsx     ← chrome-less, force-dynamic, redirect-aware
     │   ├── (storefront)/layout.tsx            ← chrome composition point + StoreProvider init
-    │   ├── (storefront)/page.tsx              ← home: 13 sections in reference order (hero, brand marquee, rows, deals, UGC)
+    │   ├── (storefront)/page.tsx              ← home: 12 sections in reference order (hero, brand marquee, rows, **composite deals**, UGC)
     │   ├── (storefront)/shop/                 ← PLP (functional superset; deep-linkable filters)
     │   ├── (storefront)/product/[slug]/       ← PDP + JSON-LD + related row
     │   ├── (storefront)/cart/ checkout/ checkout/success/ wishlist/
@@ -191,6 +191,7 @@ luxury-fashion-store/
     ├── components/
     │   ├── store/              ← header, mobile-nav, cart-drawer, search-overlay, product-card,
     │   │                          product-detail, hero-carousel, shop-client, cart-page-client,
+    │   │                          sale-countdown (P-9), exclusive-deals (composite, P-9),
     │   │                          footer, newsletter, announcement-bar, store-provider, ...
     │   ├── checkout/           ← 3-step wizard (client)
     │   ├── account/            ← tabs (orders/addresses/profile/settings), auth-form
@@ -208,10 +209,12 @@ luxury-fashion-store/
         ├── image.ts            ← hardened catalog-image extraction (single firstImage contract)
         ├── prisma-errors.ts    ← isUniqueViolation (P2002) / isRecordNotFound (P2025) detectors
         ├── search-params.ts    ← firstParam(): repeated query keys arrive as string[] (H-1)
-        ├── focus-trap.ts       ← installFocusTrap: focus contract for hand-rolled dialogs (H-26)
+        ├── focus-trap.ts       ← installFocusTrap: focus contract for hand-rolled dialogs (H-26; document-level keydown since H-41)
         ├── sweeper.ts          ← expired-session / idle-guest-cart sweep plan + executor (K-1)
+        ├── adjust-plan.ts      ← pure cart-stepper planner: planAdjustment / planCorrection (H-39/H-40)
+        ├── countdown.ts        ← SALE_COUNTDOWN_MS + formatCountdownParts (P-9)
         ├── money.ts / delivery.ts / products.ts
-        └── data/catalog.ts     ← reference-extracted catalog, slides, menus, demo users
+        └── data/catalog.ts     ← reference-extracted catalog, slides, menus, demo users, COLOR_HEX
 ```
 
 ### 3.3 Critical Code Patterns
@@ -403,11 +406,11 @@ Hero crossfade `transition-opacity duration-700`, auto-rotate 5000ms; drawers/ov
 
 | Category | Files | Tests | Location | Framework |
 |---|---|---|---|---|
-| Unit (pure seams) | 11 | 82 | `src/lib/*.test.ts` | Vitest (node) |
+| Unit (pure seams) | 13 | 98 | `src/lib/*.test.ts` | Vitest (node) |
 | E2E setup | 1 | 1×2 projects | `tests/e2e/auth.setup.ts` | Playwright |
-| E2E functional | 9 | 50 cases × 2 profiles (100 passed + 2 desktop-only skips on mobile) | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
+| E2E functional | 9 | 57 cases × 2 profiles (111 passed + 3 desktop-only skips on mobile) | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
 
-E2E coverage map: home (hero **per-slide anchoring incl. slide-3 center (P-8) + push transition + brand marquee (P-1..P-3 pins)**/sections/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related) · cart+checkout (drawer steppers, empty state, totals, **double-remove races emit no 5xx (H-23)**, **drawer focus trap (H-26)**, COD end-to-end, **card path incl. visible field errors (H-5)**, **guest→user cart merge at login (H-21 pin, cleans up after itself)**) · auth (login card, wrong-password alert, register validation, **register happy path (H-8)**, logout) · **account addresses (add/edit-prefill/update/set-default/delete — the H-4 remount pin)** · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px, stacking, navigation, Escape/backdrop close, focus trap — H-26)** · admin (role gate + console pages + **dashboard KPI floors + Revenue-excludes-cancelled semantics (H-28)**; real mutation flows: order status/carrier set/clear; **orders take-cap COUNT pin (H-2, injects 104 cancelled rows)**; **product stock → storefront sellout path (H-7/H-15)**; **visibility toggle → /shop (H-7)**).
+E2E coverage map: home (hero **per-slide anchoring incl. slide-3 center (P-8) + push transition + brand marquee (P-1..P-3 pins)**/sections incl. **the P-9 composite deals: live countdown (format + 1s tick + 3×48px ink boxes), bento headings, 4-equal-column sale grid**/**P-10 card stack pins: name, 16px stroke stars, swatches, red-500 discount chip, no NEW chip**/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related/**quick-view focus trap (H-43)**) · cart+checkout (drawer steppers, empty state, totals, **double-remove races emit no 5xx (H-23)**, **drawer focus trap (H-26)**, **sold-out adjust guard (H-39)**, COD end-to-end, **card path incl. visible field errors (H-5)**, **guest→user cart merge at login (H-21 pin, cleans up after itself)**) · auth (login card, wrong-password alert, register validation, **register happy path (H-8)**, logout) · **account addresses (add/edit-prefill/update/set-default/delete — the H-4 remount pin)** · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px, stacking, navigation, Escape/backdrop close, focus trap — H-26)** · admin (role gate + console pages + **dashboard KPI floors + Revenue-excludes-cancelled semantics (H-28)**; real mutation flows: order status/carrier set/clear; **orders take-cap COUNT pin (H-2, injects 104 cancelled rows)**; **product stock → storefront sellout path (H-7/H-15)**; **visibility toggle → /shop (H-7)**).
 
 ### 7.2 Test Patterns
 
@@ -418,8 +421,8 @@ E2E coverage map: home (hero **per-slide anchoring incl. slide-3 center (P-8) + 
 ### 7.3 Pre-Deploy Checklist
 
 ```bash
-npm run verify      # typecheck → lint → 82 unit → production build (+ standalone assembly)
-npm run test:e2e    # 50 cases × 2 projects (+2 setup); requires the fresh build
+npm run verify      # typecheck → lint → 98 unit → production build (+ standalone assembly)
+npm run test:e2e    # 57 cases × 2 projects (+2 setup); requires the fresh build
 ```
 
 Both green = shippable. `npm run build` must re-run after ANY source change before E2E (the suite tests the built artifact, not dev).
