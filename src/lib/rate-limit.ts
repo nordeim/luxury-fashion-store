@@ -43,16 +43,18 @@ export function rateLimit(key: string, max: number, windowMs: number): RateLimit
 }
 
 /**
- * Best-effort client IP (F-6, session-3): `x-forwarded-for` is client-controlled,
- * so it is only honored when the deployment opts in with TRUST_PROXY=1 (i.e. the
- * app actually sits behind a trusted reverse proxy that overwrites the hop).
- * Without it, a direct client could rotate the header on every request and never
- * trip a login/register/checkout bucket; headerless clients share one bucket.
+ * Best-effort client IP (F-6 + G-2): BOTH `x-forwarded-for` and `x-real-ip`
+ * are client-controlled hop headers, so either is honored only when the
+ * deployment opts in with TRUST_PROXY=1 (i.e. the app actually sits behind a
+ * trusted reverse proxy that overwrites them). Without it, a direct client
+ * could rotate either header on every request and never trip a
+ * login/register/checkout bucket; headerless clients share one bucket.
  */
 export function clientIpFrom(headers: Headers): string {
   if (process.env.TRUST_PROXY === "1") {
     const fwd = headers.get("x-forwarded-for");
     if (fwd) return fwd.split(",")[0].trim();
+    return headers.get("x-real-ip") ?? "local";
   }
-  return headers.get("x-real-ip") ?? "local";
+  return "local";
 }

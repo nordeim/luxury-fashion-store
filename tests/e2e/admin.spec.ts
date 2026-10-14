@@ -39,4 +39,43 @@ test.describe("admin console (admin session)", () => {
     await page.goto("/admin/products");
     await expect(page.getByText(/silk/i).first()).toBeVisible();
   });
+
+  // Session 4, G-1: the dashboard visit alone never caught the admin.ts
+  // `status` ReferenceError — every mutation 500'd while all gates stayed
+  // green. This spec performs a REAL mutation (status change, carrier set,
+  // carrier clear) through the actual form seam.
+  test("admin can update an order: status, carrier set, carrier clear", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("admin@aurelia.com");
+    await page.getByLabel("Password").fill("Admin1234!");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/account/);
+
+    await page.goto("/admin/orders");
+    await page.getByRole("link", { name: /ORD-\d{4}-\d{3}/ }).first().click();
+    await expect(page.getByText("Manage Order")).toBeVisible();
+
+    // 1) Status transition (PLACED/DELIVERED → in_transit).
+    await page.getByLabel("Status").selectOption("in_transit");
+    await page.getByRole("button", { name: /save changes/i }).click();
+    await expect(page.getByRole("status")).toHaveText("Order updated.");
+
+    // 2) Carrier + tracking set — must survive a reload (server truth).
+    await page.getByLabel("Carrier").fill("DHL");
+    await page.getByLabel("Tracking Number").fill("1Z999AA10123456784");
+    await page.getByRole("button", { name: /save changes/i }).click();
+    await expect(page.getByRole("status")).toHaveText("Order updated.");
+    await page.reload();
+    await expect(page.getByLabel("Carrier")).toHaveValue("DHL");
+    await expect(page.getByLabel("Tracking Number")).toHaveValue("1Z999AA10123456784");
+
+    // 3) Carrier clear (F-9 semantics: empty string erases the field).
+    await page.getByLabel("Carrier").fill("");
+    await page.getByLabel("Tracking Number").fill("");
+    await page.getByRole("button", { name: /save changes/i }).click();
+    await expect(page.getByRole("status")).toHaveText("Order updated.");
+    await page.reload();
+    await expect(page.getByLabel("Carrier")).toHaveValue("");
+    await expect(page.getByLabel("Tracking Number")).toHaveValue("");
+  });
 });

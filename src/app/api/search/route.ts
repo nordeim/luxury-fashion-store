@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { firstImage } from "@/lib/image";
 import { clientIpFrom, rateLimit } from "@/lib/rate-limit";
 
 // Search typeahead — whitelisted route handler.
@@ -51,16 +52,3 @@ export async function GET(request: Request) {
   }
 }
 
-/** Same hardened contract as cart.ts firstImage — tolerate corrupt JSON. */
-function firstImage(raw: string): string {
-  try {
-    const parsed: unknown = JSON.parse(raw || "[]");
-    if (Array.isArray(parsed)) {
-      const first = parsed.find((x): x is string => typeof x === "string");
-      return first ?? "";
-    }
-  } catch {
-    // fall through
-  }
-  return "";
-}

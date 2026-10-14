@@ -19,6 +19,10 @@ interface SuccessPageProps {
 export default async function CheckoutSuccessPage({ searchParams }: SuccessPageProps) {
   const { order: orderNumber, t: token } = await searchParams;
   if (!orderNumber) notFound();
+  // G-8 (session-4): Next types searchParams values as string, but repeated
+  // keys (?t=a&t=b) arrive as string[] at runtime. Coerce — a non-string must
+  // simply fail verification (404), never reach the HMAC seam malformed.
+  const tokenValue = Array.isArray(token) ? token[0] : token;
 
   const order = await db.order.findUnique({
     where: { number: orderNumber },
@@ -30,7 +34,7 @@ export default async function CheckoutSuccessPage({ searchParams }: SuccessPageP
   // HMAC view-token. Anything else is a 404 (no existence leak).
   const user = await getCurrentUser();
   const isOwner = user && order.userId === user.id;
-  const isGuestWithToken = !order.userId && token && verifyOrderViewToken(order.number, token);
+  const isGuestWithToken = !order.userId && tokenValue && verifyOrderViewToken(order.number, tokenValue);
   if (!isOwner && !isGuestWithToken) notFound();
 
   // F-8 (session-3): safe parse — a corrupted address row must not 500 the page.

@@ -596,3 +596,25 @@ Stage Summary:
 - Parity law held: zero restyling; mobile-nav geometry identical to reference baseline
 - F-21 lesson institutionalized: narrowing a query is a contract change — audit consumers, pin values not visibility
 - All session-3 artifacts (plan, screenshots, SKILL/README/CLAUDE/PAD updates, worklog) land in one main-branch commit pushed via SSH wrapper v3
+
+---
+Task ID: session-4
+Agent: main (Super Z)
+Task: Fresh pull, re-validate gates, audit the session-3 remediation commit (bbea031) with the repo's review skills, TDD-remediate verified findings, browser parity + mobile-nav sweep, screenshots, docs alignment, commit + push
+
+Work Log:
+- Pulled 4875099 (docs/session_3.md transcript — docs-only); gates re-run green: typecheck ✓ lint ✓ 64/64 unit ✓ build ✓ E2E 64 passed ✓
+- Audit (Explore full-diff scan + first-hand verification of every 🔴/🟡; skills: code-review-checklist, security-and-hardening, code-quality-standards): 13 findings. Empirical probes: instrumentation guard hard-fails standalone boot without AUTH_SECRET (HTTP 500s); DOM-lib compile blindness proven with tsconfig probe + node ReferenceError repro
+- G-1 🔴 CONFIRMED: session-3's F-9 rewrite dropped `status` from the destructure — bare global typechecks via lib.dom's window.status, throws ReferenceError in Node → EVERY admin order mutation 500'd in production while all gates stayed green. Fixed: destructure + new E2E that performs a real mutation (status change, carrier set, carrier clear) + ESLint no-restricted-globals (status/name/origin/event/close)
+- G-1b 🔴 caught by the new E2E during green phase: F-9's clear path NEVER worked — `carrier ?? order.carrier` treats the clear intent (null) as nullish and re-writes the old value. Fixed with explicit three-valued mapping; pinned by the clear-then-reload step
+- G-2 x-real-ip ungated (bucket bypass) → both hop headers TRUST_PROXY-gated (unit pins red→green); G-3 Low Stock KPI reads take-capped list → dedicated count() (F-21 class); G-4 cart P2002 single-shot retry escaped uncaught → bounded ≤3 loop with per-attempt stock re-read; G-5 guest cart+wishlist cookies deleted BEFORE the merge work → moved after commit (orphan risk); G-6 actor backfill added to seed (idempotent, upgrade-safe); G-7 firstImage ×3 (with drift!) + isUniqueViolation ×2 → src/lib/image.ts + src/lib/prisma-errors.ts (unit-pinned); G-8 success-page token array coerced (probed: Buffer.from(['a','b']) does NOT throw — auditor's 500 claim corrected to benign 404, hardened anyway); G-9 README demo-creds wording; G-10 dead CATEGORY_SLUGS export removed (CategorySlug union kept — internal use); G-11 tracking note dangling em-dash
+- Final gates: typecheck ✓ lint (incl. new guard) ✓ 72/72 unit (9 files) ✓ build ✓ E2E 66 passed (32 unique × 2 + 2 setup) ✓
+- Browser: admin mutation flow live-verified (status → timeline event stamped; carrier set persists; carrier clear persists; 0 console errors); reference site re-recon at 390×844 — its live mobile-menu DOM is `flex flex-col gap-5 mt-4` (256px @ x=32), the exact pattern the clone pins; clone mobile nav gaps re-measured [20,20,20,20,29,20] — identical baseline
+- Screenshots: 11 files in docs/screenshots/ (9 clone set incl. account + admin-dashboard, + ref-home-desktop + ref-mobile-menu-open recon aids)
+- Docs aligned: SKILL.md (counts 72/64, trap §9 #18 DOM-global blindness, §10 row, checklist, lesson #9 extended with G-1 recurrence, App B ledger→session4), README (badge + counts + F-5 wording fix), CLAUDE.md gate counts, PAD (test table 9/72 + 8/64, E2E coverage map admin mutation note, lib tree image.ts + prisma-errors.ts), docs/remediation-plan-session4.md (G-1..G-11 + G-1b addendum, evidence ledger)
+
+Stage Summary:
+- Production-blocking bug found and killed: admin order management was dead since session-3's F-9 rewrite (every mutation 500) — invisible to every gate until an E2E exercised the actual mutation
+- Regression class now guarded at three layers: ESLint no-restricted-globals (compile-time blindness), mutation-exercising E2E (behavioral), value-pinned assertions (silent drift)
+- Rate limiter no longer bypassable via either hop header; cart merge failures no longer orphan guest carts; shared helpers de-drifted
+- Parity law held: zero restyling; mobile-nav geometry identical to the reference's live DOM (flex gap-5 measured on pastel-aurelia itself)

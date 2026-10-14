@@ -205,6 +205,8 @@ luxury-fashion-store/
         ├── rate-limit.ts       ← in-memory fixed-window limiter (TRUST_PROXY-gated client IP)
         ├── order-token.ts      ← HMAC guest order-view capability tokens (authSecret()-backed)
         ├── address.ts          ← schema-checked shipping-address parser (no raw JSON.parse)
+        ├── image.ts            ← hardened catalog-image extraction (single firstImage contract)
+        ├── prisma-errors.ts    ← isUniqueViolation (P2002) detector for retry loops
         ├── money.ts / delivery.ts / products.ts
         └── data/catalog.ts     ← reference-extracted catalog, slides, menus, demo users
 ```
@@ -393,11 +395,11 @@ Hero crossfade `transition-opacity duration-700`, auto-rotate 5000ms; drawers/ov
 
 | Category | Files | Tests | Location | Framework |
 |---|---|---|---|---|
-| Unit (pure seams) | 7 | 64 | `src/lib/*.test.ts` | Vitest (node) |
+| Unit (pure seams) | 9 | 72 | `src/lib/*.test.ts` | Vitest (node) |
 | E2E setup | 1 | 1×2 projects | `tests/e2e/auth.setup.ts` | Playwright |
-| E2E functional | 8 | 62 runs | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
+| E2E functional | 8 | 64 runs | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
 
-E2E coverage map: home (hero/sections/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related) · cart+checkout (drawer steppers, empty state, totals, COD end-to-end) · auth (login card, wrong-password alert, register validation, logout) · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px, stacking, navigation, Escape/backdrop close)** · admin (role gate + console pages).
+E2E coverage map: home (hero/sections/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related) · cart+checkout (drawer steppers, empty state, totals, COD end-to-end) · auth (login card, wrong-password alert, register validation, logout) · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px, stacking, navigation, Escape/backdrop close)** · admin (role gate + console pages + **a real mutation flow**: status transition, carrier set, carrier clear — added in session 4 after G-1 proved page-visit tests prove nothing about action seams).
 
 ### 7.2 Test Patterns
 

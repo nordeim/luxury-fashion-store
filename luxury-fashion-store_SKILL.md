@@ -59,8 +59,8 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | Styling | Tailwind CSS (CSS-first `@theme`) | 4.3.3 | v4 traps — see §9 #1–#2 |
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
-| Unit tests | Vitest (node env) | 3.2.7 | 64 tests in `src/lib/*.test.ts` |
-| E2E | Playwright (standalone server) | 1.64.0 | 62 executions + 2 setup |
+| Unit tests | Vitest (node env) | 3.2.7 | 72 tests in `src/lib/*.test.ts` (9 files) |
+| E2E | Playwright (standalone server) | 1.64.0 | 64 executions + 2 setup |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -287,6 +287,15 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
     runtime); production must not have it. `next.config.ts` builds the policy from
     `process.env.NODE_ENV`. Symptom in dev if wrong: console CSP violations, blank
     hydration.
+18. **[CRITICAL] TypeScript's DOM lib hides bare-global bugs in server code** —
+    `lib: ["dom",…]` declares legacy browser globals (`window.status`, `name`,
+    `origin`, `event`, `close`), so a bare `status` in a server action COMPILES
+    CLEAN and throws `ReferenceError` at runtime in Node. This is exactly how
+    `adminUpdateOrderAction` shipped 100% broken (every admin mutation 500'd)
+    through typecheck + lint + unit + E2E (session 4, G-1). Defense-in-depth:
+    ESLint `no-restricted-globals` in `eslint.config.mjs` now errors on bare
+    `status`/`name`/`origin`/`event`/`close`, and an E2E must exercise every
+    mutation seam (a page-visit test proves nothing about the action).
 
 ## §10 Debugging Guide (symptom → cause → fix)
 
@@ -305,12 +314,13 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
 | "X-Frame-Options" / clickjacking complaints in embedders | Security headers ship from `next.config.ts` | Intentional (DENY) — do not remove |
 | Fix verified in `next dev` but E2E still fails on the old behavior | Stale standalone bundle (§9 #16) | `env -u DATABASE_URL npm run build`, then re-run `npm run test:e2e` |
 | Console full of CSP violations in dev; page half-hydrates | Production CSP applied to dev | Keep the `unsafe-eval` dev-conditional in `next.config.ts` (§9 #17) |
+| Server action compiles but 500s with `ReferenceError: <x> is not defined` | Bare identifier shadowed by a DOM-lib global (§9 #18) | Destructure/import explicitly; `npm run lint` (no-restricted-globals) catches it at the gate |
 
 ## §11 Pre-Ship Checklist
 
 ```bash
-npm run verify                      # typecheck → lint → 64 unit → build (+ assemble)
-npm run test:e2e                    # 62 executions + 2 setup (build FIRST — standalone, §9 #16)
+npm run verify                      # typecheck → lint → 72 unit → build (+ assemble)
+npm run test:e2e                    # 64 executions + 2 setup (build FIRST — standalone, §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present (no unsafe-eval in prod)
 
 # Parity pins
@@ -354,9 +364,10 @@ suites; no `db/*.db` staged; commit goes to `main` only.
 9. **Narrowing a query is a contract change — audit every consumer.** Session 3's
    F-19 replaced the admin dashboard's load-all-products query with the low-stock
    filter but left the Products KPI reading the same variable: the card silently
-   showed 0 instead of 12. E2E only asserted visibility, not value. Rule: when a
-   query's shape changes, grep its consumers, and pin **values** (not just
-   visibility) for KPI surfaces.
+   showed 0 instead of 12. E2E only asserted visibility, not value. It RECURRED
+   in session 4 (G-1: the F-9 destructure dropped `status`; G-1b: `??` defeated
+   the clear path) — now guarded by ESLint `no-restricted-globals`, a mutation-
+   exercising E2E, and value-pinned KPI assertions.
 
 ## §13 Pitfalls to Avoid (the "don't" list)
 
@@ -582,8 +593,8 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Commands & env | `AGENTS.md` |
 | Working standards | `CLAUDE.md` |
 | Deep architecture + ADRs | `Project_Architecture_Document.md` |
-| Latest remediation ledger | `docs/remediation-plan-session3.md` |
-| Session history | `docs/session_1.md`, `docs/session_2.md`, `worklog.md` |
+| Latest remediation ledger | `docs/remediation-plan-session4.md` |
+| Session history | `docs/session_1.md` … `session_3.md`, `worklog.md` |
 | Parity screenshots | `docs/screenshots/` |
 | Mutation seam | `src/lib/actions/*.ts` |
 | Envelope | `src/lib/action-result.ts` |

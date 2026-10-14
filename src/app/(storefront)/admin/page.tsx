@@ -16,8 +16,12 @@ export default async function AdminPage() {
   if (!user) redirect("/login?redirect=/admin");
   if (!(await isAdmin())) redirect("/account");
 
-  const [orders, lowStock, productCount, revenueAgg] = await Promise.all([
+  const [orders, lowStockCount, lowStock, productCount, revenueAgg] = await Promise.all([
     db.order.findMany({ orderBy: { placedAt: "desc" }, take: 8 }),
+    // G-3 (session-4): the KPI reads a dedicated COUNT — the list below is
+    // take-capped (20), so lowStock.length would silently under-count once
+    // more than 20 products sit at or below the threshold (F-21 class).
+    db.product.count({ where: { isActive: true, stock: { lte: 3 } } }),
     db.product.findMany({
       where: { isActive: true, stock: { lte: 3 } },
       orderBy: { sortOrder: "asc" },
@@ -42,7 +46,7 @@ export default async function AdminPage() {
             { label: "Revenue", value: formatCents(revenueAgg._sum.total ?? 0) },
             { label: "Orders", value: String(revenueAgg._count) },
             { label: "Products", value: String(productCount) },
-            { label: "Low Stock", value: String(lowStock.length) },
+            { label: "Low Stock", value: String(lowStockCount) },
           ].map((stat) => (
             <div key={stat.label} className="border border-border bg-card p-6">
               <p className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground mb-2">{stat.label}</p>

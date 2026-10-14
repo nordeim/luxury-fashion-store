@@ -13,6 +13,8 @@ import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { findCart } from "@/lib/cart";
+import { firstImage } from "@/lib/image";
+import { isUniqueViolation } from "@/lib/prisma-errors";
 import { shippingForSubtotal } from "@/lib/money";
 import { clientIpFrom, rateLimit } from "@/lib/rate-limit";
 import { checkoutSchema, isLuhnValid } from "@/lib/validation";
@@ -200,28 +202,4 @@ function placeOnce(
     await tx.cartItem.deleteMany({ where: { cartId } });
     return order;
   });
-}
-
-/** Hardened image snapshot (corrupt catalog JSON must not kill checkout). */
-function firstImage(raw: string): string {
-  try {
-    const parsed: unknown = JSON.parse(raw || "[]");
-    if (Array.isArray(parsed)) {
-      const first = parsed.find((x): x is string => typeof x === "string");
-      return first ?? "";
-    }
-  } catch {
-    // fall through
-  }
-  return "";
-}
-
-/** Prisma unique-constraint violation (P2002) — the concurrent-write signal. */
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "P2002"
-  );
 }

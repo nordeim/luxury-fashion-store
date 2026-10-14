@@ -10,8 +10,9 @@
 // multiplies by 100 to store integer cents; these literals are reference
 // dollars and are converted in exactly one place (prisma/seed.ts).
 
-export const CATEGORY_SLUGS = ["women", "men", "accessories", "shoes"] as const;
-export type CategorySlug = (typeof CATEGORY_SLUGS)[number];
+// G-10 (session-4): the exported CATEGORY_SLUGS const had zero consumers and
+// was deleted; the slug union stays (used by CatalogProduct.category below).
+export type CategorySlug = "women" | "men" | "accessories" | "shoes";
 
 export interface CatalogProduct {
   slug: string;

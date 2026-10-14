@@ -59,17 +59,25 @@ describe("clientIpFrom (TRUST_PROXY=1: behind a known proxy)", () => {
   });
 });
 
-// F-6 (session-3): XFF is only trusted when the deployment opts in via
-// TRUST_PROXY — otherwise a client can rotate the header to reset buckets.
+// F-6 (session-3) + G-2 (session-4): BOTH hop headers are client-controlled —
+// XFF and x-real-ip are only trusted when the deployment opts in via
+// TRUST_PROXY; otherwise a client can rotate either to reset buckets.
 describe("clientIpFrom", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it("ignores x-forwarded-for unless TRUST_PROXY is set", () => {
+  it("ignores x-forwarded-for AND x-real-ip unless TRUST_PROXY is set", () => {
     vi.stubEnv("TRUST_PROXY", "");
     const ip = clientIpFrom(new Headers({ "x-forwarded-for": "1.2.3.4", "x-real-ip": "5.6.7.8" }));
-    expect(ip).toBe("5.6.7.8");
+    expect(ip).toBe("local");
+  });
+
+  it("honors x-real-ip only when TRUST_PROXY=1", () => {
+    vi.stubEnv("TRUST_PROXY", "");
+    expect(clientIpFrom(new Headers({ "x-real-ip": "5.6.7.8" }))).toBe("local");
+    vi.stubEnv("TRUST_PROXY", "1");
+    expect(clientIpFrom(new Headers({ "x-real-ip": "5.6.7.8" }))).toBe("5.6.7.8");
   });
 
   it("honors the first XFF hop when TRUST_PROXY=1", () => {

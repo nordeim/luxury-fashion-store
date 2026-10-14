@@ -35,7 +35,12 @@ export async function adminUpdateOrderAction(
   });
   if (!parsed.success) return fail("Check the highlighted fields.");
 
-  const { orderId } = parsed.data;
+  // G-1 (session-4): `status` MUST be destructured here. The session-3 F-9
+  // rewrite dropped it, leaving a bare `status` reference that DOM-lib TS
+  // silently typechecks (window.status global) and Node throws at runtime —
+  // every admin order mutation 500'd while typecheck/lint/unit/E2E stayed
+  // green. ESLint no-restricted-globals now guards this class (eslint.config.mjs).
+  const { orderId, status } = parsed.data;
   const carrier = parsed.data.carrier === undefined ? undefined : parsed.data.carrier || null;
   const trackingNumber =
     parsed.data.trackingNumber === undefined ? undefined : parsed.data.trackingNumber || null;
@@ -60,16 +65,26 @@ export async function adminUpdateOrderAction(
       (carrier !== undefined && carrier !== order.carrier) ||
       (trackingNumber !== undefined && trackingNumber !== order.trackingNumber);
     if (trackingChanged) {
+      // G-1b (session-4): three-valued mapping must be explicit. `??` treats
+      // the clear intent (null, from an empty submitted field) as nullish and
+      // silently re-wrote the old value — clearing never worked. undefined =
+      // field absent (keep), null = clear, string = set.
+      const nextCarrier = carrier === undefined ? order.carrier : carrier;
+      const nextTracking = trackingNumber === undefined ? order.trackingNumber : trackingNumber;
       await tx.order.update({
         where: { id: orderId },
-        data: { carrier: carrier ?? order.carrier, trackingNumber: trackingNumber ?? order.trackingNumber },
+        data: { carrier: nextCarrier, trackingNumber: nextTracking },
       });
       await tx.orderEvent.create({
         data: {
           orderId,
           type: "tracking_added",
           actor: "admin",
-          note: `${carrier ?? order.carrier ?? "Carrier"} — ${trackingNumber ?? order.trackingNumber ?? ""}`.trim(),
+          // G-11 (session-4): join only the parts that exist — clearing the
+          // tracking number used to render a dangling "DHL —".
+          note: [nextCarrier, nextTracking]
+            .filter((part): part is string => Boolean(part))
+            .join(" — ") || "Carrier details updated",
         },
       });
     }

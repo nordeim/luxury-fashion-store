@@ -18,18 +18,10 @@ export type { CartLineDto, CartDto, WishlistDto } from "@/lib/cart-dto";
 export { EMPTY_CART, EMPTY_WISHLIST } from "@/lib/cart-dto";
 import { EMPTY_CART, EMPTY_WISHLIST } from "@/lib/cart-dto";
 import type { CartDto, CartLineDto, WishlistDto } from "@/lib/cart-dto";
+import { firstImage } from "@/lib/image";
 
 export const CART_COOKIE = "aurelia_cart";
 export const WISHLIST_COOKIE = "aurelia_wishlist";
-
-function firstImage(imagesJson: string): string {
-  try {
-    const arr = JSON.parse(imagesJson) as string[];
-    return arr[0] ?? "";
-  } catch {
-    return "";
-  }
-}
 
 export function deriveCartTotals(lines: CartLineDto[]): CartDto {
   const subtotal = lines.reduce((sum, l) => sum + l.lineTotal, 0);
@@ -157,7 +149,6 @@ export async function mergeGuestCartIntoUser(userId: string): Promise<void> {
   if (!token) return;
   const guestCart = await db.cart.findUnique({ where: { token }, include: { items: true } });
   if (!guestCart) return;
-  store.delete(CART_COOKIE);
   if (guestCart.userId === userId) return;
 
   const userCart = await db.cart.upsert({
@@ -192,6 +183,11 @@ export async function mergeGuestCartIntoUser(userId: string): Promise<void> {
     }
   });
   await db.cart.delete({ where: { id: guestCart.id } }).catch(() => undefined);
+  // G-5 (session-4): the cookie is cleared only AFTER the merge committed.
+  // Deleting it before the transaction (session-3 shape) orphaned the guest
+  // cart on a tx failure (SQLITE_BUSY under WAL contention) — the browser
+  // would drop its only reference to recoverable items.
+  store.delete(CART_COOKIE);
 }
 
 /** Same union for wishlists at login. */
@@ -201,7 +197,6 @@ export async function mergeGuestWishlistIntoUser(userId: string): Promise<void> 
   if (!token) return;
   const guestList = await db.wishlist.findUnique({ where: { token }, include: { items: true } });
   if (!guestList) return;
-  store.delete(WISHLIST_COOKIE);
   if (guestList.userId === userId) return;
 
   const userList = await db.wishlist.upsert({
@@ -217,4 +212,8 @@ export async function mergeGuestWishlistIntoUser(userId: string): Promise<void> 
     });
   }
   await db.wishlist.delete({ where: { id: guestList.id } }).catch(() => undefined);
+  // G-5 (session-4): same cookie-after-work rule as the cart merge — the
+  // cookie is the browser's only reference to the guest list, so it must
+  // outlive any mid-merge failure.
+  store.delete(WISHLIST_COOKIE);
 }
