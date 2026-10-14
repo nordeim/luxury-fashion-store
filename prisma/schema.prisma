@@ -1,0 +1,212 @@
+// AURELIA — Prisma schema (SQLite).
+//
+// Conventions (inherited from the repo family architecture):
+// - Money is integer cents everywhere; formatting happens at display time.
+// - SQLite has no enums — roles/statuses are Strings validated by Zod at
+//   every seam (src/lib/validation.ts).
+// - The database file lives at <repoRoot>/db/custom.db via the schema-relative
+//   DATABASE_URL="file:../db/custom.db" (pinned by tests/db-path.test.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  // scrypt hash "s1$<salt>$<hash>" — never plaintext (src/lib/auth.ts).
+  passwordHash String
+  name         String
+  role         String   @default("user") // "user" | "admin" (Zod-validated)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions  Session[]
+  addresses Address[]
+  cart      Cart?
+  wishlist  Wishlist?
+  orders    Order[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Address {
+  id        String  @id @default(cuid())
+  userId    String
+  label     String  @default("Home")
+  fullName  String
+  street    String
+  city      String
+  state     String
+  zip       String
+  country   String  @default("United States")
+  isDefault Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Category {
+  id        String @id @default(cuid())
+  slug      String @unique
+  name      String
+  sortOrder Int    @default(0)
+
+  products Product[]
+}
+
+model Product {
+  id             String  @id @default(cuid())
+  slug           String  @unique
+  name           String
+  brand          String
+  description    String
+  // Integer cents.
+  price          Int
+  // Integer cents; null = not on sale.
+  compareAtPrice Int?
+  discount       Int     @default(0)
+  categoryId     String
+  subcategory    String
+  // JSON-encoded string[] (SQLite has no array columns).
+  sizes          String  @default("[]")
+  colors         String  @default("[]")
+  images         String  @default("[]")
+  tag            String?
+  rating         Float   @default(0)
+  reviewCount    Int     @default(0)
+  isNew          Boolean @default(false)
+  isBestseller   Boolean @default(false)
+  // Parity contract: array position in the reference catalog (1-indexed).
+  sortOrder      Int     @default(0)
+  stock          Int     @default(12)
+  isActive       Boolean @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  category      Category       @relation(fields: [categoryId], references: [id])
+  cartItems     CartItem[]
+  wishlistItems WishlistItem[]
+  orderItems    OrderItem[]
+}
+
+model Cart {
+  id        String   @id @default(cuid())
+  // Guest identity: 192-bit httpOnly cookie token; unique per user when claimed.
+  token     String   @unique
+  userId    String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  productId String
+  // Chosen size (fashion SKUs are size-specific lines).
+  size      String   @default("")
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId, size])
+}
+
+model Wishlist {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items WishlistItem[]
+}
+
+model WishlistItem {
+  id         String   @id @default(cuid())
+  wishlistId String
+  productId  String
+  createdAt  DateTime @default(now())
+
+  wishlist Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([wishlistId, productId])
+}
+
+model Order {
+  id              String   @id @default(cuid())
+  // Human-readable, zero-padded: ORD-2026-001.
+  number          String   @unique
+  // null = guest order (confirmation behind an HMAC view-token).
+  userId          String?
+  email           String
+  status          String   @default("processing") // processing | in_transit | delivered | cancelled
+  subtotal        Int
+  shipping        Int
+  total           Int
+  // JSON snapshot of the shipping address at placement time.
+  shippingAddress String
+  paymentMethod   String   @default("card") // card | cod
+  cardLast4       String?
+  paymentStatus   String? // paid | refunded (demo settlement writes here)
+  carrier         String?
+  trackingNumber  String?
+  placedAt        DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user   User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  items  OrderItem[]
+  events OrderEvent[]
+}
+
+model OrderItem {
+  id            String  @id @default(cuid())
+  orderId       String
+  productId     String?
+  // Snapshots — the order must survive product edits/deletion.
+  nameSnapshot  String
+  brandSnapshot String?
+  imageSnapshot String?
+  sizeSnapshot  String?
+  unitPrice     Int
+  quantity      Int
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+}
+
+model OrderEvent {
+  id        String   @id @default(cuid())
+  orderId   String
+  type      String // placed | status_changed | tracking_added
+  note      String?
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model NewsletterSubscriber {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  createdAt DateTime @default(now())
+}

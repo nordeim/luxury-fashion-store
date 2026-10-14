@@ -1,0 +1,190 @@
+@import "tailwindcss";
+
+/* ============================================================
+   AURELIA — design tokens (measured live on the reference
+   pastel-aurelia-fashion-edit.base44.app, 2026-10-14).
+
+   Tailwind v4 trap pins (see AGENTS.md trap log):
+   1. Theme colors are FULL hsl() literals — bare `H S% L%` triplets
+      (what the reference ships) resolve to transparent under v4.
+   2. --shadow-sm pinned to v3 geometry (v4 shifted the scale a notch).
+   3. Radius scale pinned to the reference's shadcn v3 derivation
+      (--radius .25rem → rounded-sm 0px / md 2px / lg 4px), verified
+      computed on the reference (ADD TO BAG = 0px, card image = 4px).
+   4. --blur-sm pinned to v3's 4px (v4 renamed the scale, sm = 8px).
+   5. Slate palette pinned to v3 hexes (v4's oklch palette drifts
+      ~1-3/channel) — the auth card + 404 page use slate-*.   */
+
+/* Self-hosted fonts — the exact latin woff2 subsets Google Fonts serves
+   for Cormorant Garamond + Montserrat (FILE parity; next/font repackages
+   woff2 and rasterizes differently). */
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-300.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: italic;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-300-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-400-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 200;
+  font-display: swap;
+  src: url("/fonts/montserrat-200.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/fonts/montserrat-300.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/montserrat-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/montserrat-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/montserrat-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/montserrat-700.woff2") format("woff2");
+}
+
+@theme inline {
+  /* Reference :root tokens — full hsl() literals (trap pin #1). */
+  --color-background: hsl(30 15% 97%);
+  --color-foreground: hsl(25 15% 8%);
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(25 15% 8%);
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(25 15% 8%);
+  --color-primary: hsl(25 15% 8%);
+  --color-primary-foreground: hsl(30 15% 97%);
+  --color-secondary: hsl(30 20% 93%);
+  --color-secondary-foreground: hsl(25 15% 8%);
+  --color-muted: hsl(30 15% 92%);
+  --color-muted-foreground: hsl(25 10% 45%);
+  --color-accent: hsl(35 60% 55%);
+  --color-accent-foreground: hsl(0 0% 100%);
+  --color-destructive: hsl(0 84.2% 60.2%);
+  --color-destructive-foreground: hsl(0 0% 98%);
+  --color-border: hsl(30 15% 88%);
+  --color-input: hsl(30 15% 88%);
+  --color-ring: hsl(35 60% 55%);
+
+  /* Brand extensions used by the reference classes. */
+  --color-gold: hsl(42 75% 52%);
+  --color-gold-light: hsl(42 80% 70%);
+  --color-cream: hsl(38 40% 96%);
+  --color-charcoal: hsl(220 15% 18%);
+
+  /* Fonts (utility names byte-identical to the reference: font-cormorant /
+     font-montserrat). --font-sans is the body default. */
+  --font-sans: "Montserrat", sans-serif;
+  --font-montserrat: "Montserrat", sans-serif;
+  --font-cormorant: "Cormorant Garamond", serif;
+
+  /* Radius pins (trap pin #3): the reference's shadcn v3 config derives
+     rounded-sm/md/lg from --radius: .25rem. Verified computed: size chips 0px,
+     product-card image 4px. xl/2xl keep the v3 defaults (.75rem/1rem). */
+  --radius-sm: 0px;
+  --radius-md: 2px;
+  --radius-lg: 4px;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+
+  /* Shadow pin (trap pin #2): v3's shadow-sm geometry. */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+
+  /* Blur pin (trap pin #4): v3's blur-sm = 4px (v4 renamed it to 8px). */
+  --blur-sm: 4px;
+
+  /* Slate palette pinned to v3 hexes (trap pin #5) — auth card + 404. */
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+
+  /* Sale-badge red (v3 red-600 hex). */
+  --color-red-600: #dc2626;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply bg-background;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+  /* The reference's platform CSS sets button cursor: pointer; v4 preflight
+     does not. Restored for parity. */
+  button {
+    cursor: pointer;
+  }
+  ::selection {
+    background: hsl(42 75% 52% / 0.3);
+  }
+}

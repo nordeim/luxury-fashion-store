@@ -1,17 +1,11 @@
-# HomeNest Kitchen — Master Project Architecture Document (PAD) v1.0
+# AURELIA — Master Project Architecture Document (PAD) v1.0
 
 **Classification:** Internal Engineering Reference
 **Status:** DEFINITIVE, PRODUCTION-LOCKED BLUEPRINT
-**Companion Document:** `AGENTS.md` (agent rulebook + trap log), `CLAUDE.md` (workflow playbook), `README.md` (onboarding)
-**Last Updated:** 2026-10-12
+**Companion Documents:** `AGENTS.md` (agent commands/quirks), `CLAUDE.md` (agent workflow), `README.md` (user-facing overview)
+**Last Updated:** 2026-10-14
 **Audience:** Senior Engineers, Tech Leads, DevOps, and Onboarding Engineers
 **Rule:** Every architectural decision in this document traces to a specific rationale. Nothing is here "because it's popular."
-
----
-
-#### Revision Block — v1.0 (Tracked Changes)
-
-- `[SYN]` Initial locked blueprint after the reference-parity remediation (session: audit → redesign → test harness → docs). All measurements taken live against `nest-culinary-hub.base44.app` on 2026-10-12 with an authenticated browser session; all computed-style pins taken from this repo's production build the same day.
 
 ---
 
@@ -36,410 +30,356 @@
 
 ### 1.1 Document Metadata & Purpose
 
-This PAD is the single source of truth for the HomeNest Kitchen storefront. It describes the **current** system only; history lives in git. Read §3 first when changing code, §7 before touching tests, §5 before touching visuals. The document exists because the project's defining constraint — **computed-style parity with an external reference site** — is invisible from filenames alone.
+AURELIA (storefront brand: **VELOUR**) is a production-grade luxury fashion e-commerce application: storefront, customer accounts, and admin console. It is a **functional superset** of a visual-only reference prototype (`pastel-aurelia-fashion-edit.base44.app`) whose measured behavior is: working login, cart drawer, and search overlay only — every commerce button is inert and every catalog route 404s. The clone mandate is therefore twofold and non-negotiable:
+
+1. **Visual parity** — resting-state pixels of every shared surface match the reference's computed styles.
+2. **Functional superset** — every inert interaction becomes a real, server-backed commerce flow.
+
+How to use this document: new engineers read §2–§4 for the mental model; debuggers start at §3.3 (invariants) and §10; reviewers of tech choices read §1.3 (ADRs).
 
 ### 1.2 Technology Stack Summary
 
-| Layer | Technology | Version (lockfile) | Key Rationale |
+| Layer | Technology | Version (pinned) | Key Rationale |
 |---|---|---|---|
-| Build tool | Vite | 7.3.7 | Instant HMR for a component-heavy SPA; `appType: "spa"` preview fallback serves deep links in E2E without extra config |
-| UI runtime | React | 19.2.6 | Context + hooks are sufficient; the app is one store, not a state-management showcase |
-| Language | TypeScript | 5.9.3 (strict) | `noUnusedLocals`/`noUnusedParameters` double as the lint gate; no `any` at boundaries |
-| Styling | Tailwind CSS | 4.1.17 | CSS-first `@theme` tokens; v4 was required to mirror the reference, which is itself a v4 app (oklch conversions and all) |
-| Icons | lucide-react | 1.55.0 | Matches the reference's icon set visually (House, ShoppingBag, Banknote, …) |
-| Class utilities | clsx + tailwind-merge | 2.1.1 / 3.4.0 | Conditional classes without style objects |
-| Unit tests | Vitest | 4.1.11 | Node env, zero DOM cost, co-located seam tests |
-| E2E tests | @playwright/test | 1.64.0 | Computed-style assertions (`toHaveCSS`), multi-project (desktop + mobile profiles) |
-| Output | vite-plugin-singlefile | 2.3.3 | Single `dist/index.html` — the deployment unit is one static file |
-| Fonts | Playfair Display (Google Fonts) | — | The reference's display serif; system sans stack for body text matches the reference's `ui-sans-serif` body |
+| Web framework | Next.js (App Router, Turbopack, standalone output) | 16.4.0 | RSC + server actions give a zero-API mutation seam; standalone ships a self-contained server |
+| UI runtime | React | 19.3.0 | `useActionState` + adjust-state-during-render; Compiler-compatible patterns enforced by lint |
+| Language | TypeScript (strict) | 5.9.3 | Action envelopes and DTOs typed end-to-end |
+| Styling | Tailwind CSS v4 (CSS-first) | 4.3.3 | Reference extracted as v3-style bare HSL tokens; v4 `@theme inline` with full `hsl()` literals reproduces them exactly |
+| ORM / DB | Prisma + SQLite | 6.19.3 | Single-writer file DB fits the demo/single-node scope; schema-relative URL contract |
+| Validation | Zod | 3.25.76 | One schema language across forms, actions, admin updates |
+| Auth | Custom scrypt + DB sessions | — | No external IdP dependency; reference has email/password only |
+| Unit testing | Vitest (node env) | 3.2.7 | Fast pure-seam coverage (money, URL contract, schemas, limiter, HMAC) |
+| E2E testing | Playwright | 1.64.0 | Boots the real production standalone against a scratch DB; chromium + mobile profiles |
+| Icons | lucide-react | 0.545.0 | Same icon set as the reference (stroke width 2) |
+| Fonts | Cormorant Garamond + Montserrat (self-hosted) | — | Reference typefaces; `@font-face` + `font-display: swap` in `public/fonts/` |
 
 ### 1.3 Architecture Decision Records
 
-**ADR-001: Client-only SPA with localStorage persistence (no backend).**
+**ADR-001: Server actions are the only mutation seam**
 
-- **Context:** The reference is a hosted Base44 app; the clone must run anywhere a static file can be served, with no database credentials in the demo.
-- **Decision:** All commerce state (users, sessions, cart, wishlist, orders, product overrides, carousel, promo, newsletter) lives in a versioned `localStorage` key (`homenest.v2`) managed by a single React context (`src/lib/store.tsx`). No server, no API routes.
-- **Rationale:** Faithful flows (stock decrements, order timelines, role gates) without infrastructure; deterministic E2E tests (fresh context = fresh store); deployment is one HTML file.
-- **Consequences:** ➖ No cross-device or multi-user data; ➖ passwords are demo-grade (§6.4); ➕ zero-ops, tamper-safe demo, trivially portable.
-- **Alternatives rejected:** Prisma/SQLite backend (the reference-repo pattern) — rejected for this scope: it breaks the single-file deployment story and adds ops without changing what the demo teaches. The `DATABASE_URL` contract is nonetheless preserved and contract-tested so a future server workstream can adopt the repo layout unchanged.
+- **Context:** The reference prototype performs mutations nowhere (inert buttons); the clone needs cart/checkout/wishlist/auth/admin writes with zero bespoke REST surface, and every write must be server-authoritative.
+- **Decision:** All mutations live in `"use server"` modules under `src/lib/actions/`. Reads happen in RSC pages via Prisma directly. REST exists only for three read/subscribe endpoints (`/api/health`, `/api/search`, `/api/newsletter`).
+- **Rationale:** Server actions give typed, CSRF-safe, progressively-enhanced mutations with no API layer to keep in sync; the repo-family architecture (ecommerce-store) proved the pattern at 4-endpoint REST whitelist scale.
+- **Consequences:** (+) one place to audit writes; (+) client store always re-syncs from action DTOs (server truth wins); (−) actions are not curl-able — E2E must drive the UI.
+- **Alternatives rejected:** REST route handlers + SWR mutations (duplicates validation + typing); tRPC (extra runtime for 8 actions).
 
-**ADR-002: Schema-relative DATABASE_URL contract (`file:../db/custom.db` → repo-root `db/`).**
+**ADR-002: SQLite via schema-relative `DATABASE_URL`, re-anchored at runtime**
 
-- **Context:** The repo pins `DATABASE_URL="file:../db/custom.db"`; the `db/` folder must sit at the repo root; a future Prisma schema would live in `prisma/`.
-- **Decision:** `src/lib/db-path.ts` resolves `file:` URLs the way the Prisma CLI does — relative to a `prisma/` schema anchor, with normalization — and exposes `dbPathFromRepoRoot()` (`db/custom.db`). Pinned by `tests/db-path.test.ts` (8 tests).
-- **Rationale:** One URL resolves to one physical file from any working directory; the contract is executable documentation instead of a comment.
-- **Consequences:** ➕ Tooling can compute the real DB location; ➖ the resolution rules are load-bearing ("do not simplify"). Session 26 (R26-03) added `npm run db:setup` — the contract now also has a real referent: a materialized SQLite file (schema + catalog + demo-user digests) at the resolved path, zero dependencies (`node:sqlite`), still tooling-only (the SPA never reads it).
-- **Alternatives rejected:** Naive string stripping (the v1 implementation) — it documented the URL without honoring its semantics.
+- **Context:** The database must live at `<repoRoot>/db/custom.db` regardless of which process opens it (dev server, seed script, standalone production server whose cwd is `.next/standalone`).
+- **Decision:** `.env` pins `DATABASE_URL="file:../db/custom.db"` (the Prisma CLI's schema-relative form). `src/lib/db-path.ts` reproduces the CLI rule (walk up from cwd to the nearest `prisma/schema.prisma`, resolve the URL against it). `src/lib/db.ts` passes every URL through that resolver before constructing `PrismaClient`. Absolute `file:` URLs pass through untouched.
+- **Rationale:** The generated client bakes the schema directory at generate time, which MOVES in the standalone bundle; the resolver makes dev, tooling, and the standalone agree on one physical file.
+- **Consequences:** (+) one contract for all runtimes; (−) the resolver's `existsSync` reads make file tracing copy `prisma/schema.prisma` into the bundle — which would re-anchor relative URLs to `<bundle>/db/` (nonexistent). Hence the E2E webServer uses an absolute URL (pass-through path), and deployments must too.
+- **Alternatives rejected:** absolute URL in `.env` (breaks the documented contract + tests); raw client default (broke in standalone: "Unable to open the database file").
 
-**ADR-003: Custom history-API router with centralized `matchPath`.**
+**ADR-003: Custom scrypt auth with DB-backed sessions and HMAC cookies**
 
-- **Context:** The app needs deep-linkable routes from a single static file, including the reference's `/product/:id` URL shape.
-- **Decision:** `src/lib/router.tsx` provides `RouterProvider` (popstate-synced), `navigate(to, { replace })`, a `Link` component (modifier-key aware, default-prevented), and one `matchPath()` function covering 27 routes. `vite preview`'s SPA fallback serves deep links in E2E.
-- **Rationale:** react-router's weight is unnecessary for 27 literal patterns; centralizing matching keeps route structure a testable parity surface (the reference URL shape `/product/:id` is asserted in E2E).
-- **Consequences:** ➕ Tiny, auditable, parity-controlled; ➖ new routes require three coordinated edits (`matchPath`, `App.tsx` switch, guards).
-- **Alternatives rejected:** react-router — extra dependency for no behavioral gain at this route count.
+- **Context:** Email/password auth matching the reference's login card; no third-party IdP; rate-limitable.
+- **Decision:** `scrypt` password hashing (`s1$<salt>$<hash>` format), `Session` rows in SQLite, session id inside an HMAC-signed httpOnly cookie (`AUTH_SECRET`), guest carts/wishlists keyed by 192-bit random tokens merged into the user's rows at login.
+- **Rationale:** Zero external dependencies, full control over rate limiting and session revocation (logout deletes the row), and the guest→member merge maps 1:1 onto the cart token model.
+- **Consequences:** (+) revocable, auditable, no vendor lock; (−) no OAuth (the Google button on the auth card is a visual parity stub, explicitly titled as such).
+- **Alternatives rejected:** NextAuth (heavier than needed; reference has no OAuth); localStorage auth (the pre-transformation SPA's model — plaintext, unrevocable).
 
-**ADR-004: One StoreProvider; gate on `ready` before auth redirects.**
+**ADR-004: Single client state seam (`StoreProvider`), server-truth re-sync**
 
-- **Context:** Persisted state rehydrates from localStorage in a mount effect; guards that navigate on first render would fire before hydration (observed: hard-refresh of `/admin` kicked logged-in users to `/login`).
-- **Decision:** A single `StoreContext` exposes state + mutation callbacks plus a `ready` flag. `AdminFrame` and `AccountPage` wait for `ready` before rendering or redirecting.
-- **Rationale:** One source of truth; the ready-gate makes the hydration race structurally impossible rather than timing-dependent (regression-pinned by E2E).
-- **Consequences:** ➕ Refresh-safe sessions; ➖ components must consume `ready` (documented in AGENTS.md).
-- **Alternatives rejected:** Sync localStorage read during `useState` initializer — breaks SSR shape and re-introduces first-render cost for every visitor.
+- **Context:** Cart, wishlist, user, and four overlay states are consumed across many client islands; naive per-component fetching caused drift in the reference family.
+- **Decision:** One React context (`StoreProvider`) initialized from server props; mutations return fresh DTOs that the caller writes back via `setCart`/`setWishlist`. Router refresh re-syncs via the adjust-state-during-render pattern (last-seen-props in state — no setState-in-effect).
+- **Rationale:** Server actions are async and cheap; keeping the client cache as a mirror of action responses eliminates optimistic-math bugs (totals, counts) by construction.
+- **Consequences:** (+) no client money math at all; (−) every mutation pays an action round-trip (acceptable at this scale).
+- **Alternatives rejected:** Zustand (second state mechanism); optimistic updates (contradicts server-truth invariant).
 
-**ADR-005: Tailwind v4 CSS-first with a measured token set and computed-style parity gate.**
+**ADR-005: Tailwind v4 CSS-first with pinned parity literals**
 
-- **Context:** The reference renders v4 output; its palette is shadcn-style HSL triplets (`--primary: 24 70% 50%`, etc.).
-- **Decision:** All tokens live in `src/index.css` `@theme` as full `hsl()` literals; no `tailwind.config.js`. `tests/e2e/visual-parity.spec.ts` pins computed colors (`rgb(217,110,38)` primary, `rgb(251,250,249)` canvas, `rgb(32,27,24)` footer, `rgb(220,40,40)` discount, `rgb(245,159,10)` badge, Playfair Display 700 headings).
-- **Rationale:** v4's oklch conversions make eyeballed ports drift; computed styles (not screenshots) are assertable and deterministic.
-- **Consequences:** ➕ Parity is a build-breaker, not an opinion; ➖ token changes require re-measuring specs in the same commit.
-- **Alternatives rejected:** Screenshot diffing — nondeterministic across environments, and silently tolerates structural drift.
+- **Context:** The reference was built on Tailwind v3-style tokens (bare HSL triplets) and its mobile menu uses `flex flex-col gap-5` stacking. v4 changes both semantics (bare triplets resolve transparent; `space-y-*` rewrites its selector).
+- **Decision:** All tokens are declared as full `hsl(...)` literals in `@theme inline` (`src/app/globals.css`); parity stacks use flex `gap-*` exclusively; fonts are self-hosted `@font-face`.
+- **Rationale:** Computed-style parity is the product requirement; the pins are enforced by E2E geometry assertions (`tests/e2e/mobile-navigation.spec.ts` measures bounding boxes, not class names).
+- **Consequences:** (+) byte-identical rendering semantics; (−) future maintainers must not "simplify" `gap-5` → `space-y-5` (the v4 trap the pins guard).
 
-**ADR-006: Mobile menu portaled to `<body>` (the backdrop-filter containing-block rule).**
+**ADR-006: Production standalone E2E with per-project auth sessions**
 
-- **Context:** The v1 mobile drawer rendered inside the sticky header, which uses `backdrop-blur-sm`. Per CSS spec, `backdrop-filter` makes an element the containing block for `position: fixed` descendants — the drawer was confined to the 64–72px header box and appeared broken.
-- **Decision:** The mobile menu (overlay + panel) is rendered via `createPortal(…, document.body)` as a fixed dropdown panel below the header; scroll locks and Escape handling stay in the `Header`.
-- **Rationale:** Removes the trap structurally instead of sacrificing the header's blur; matches the reference's inline-dropdown menu behavior.
-- **Consequences:** ➕ Robust menu at any header style; ➖ the menu must not rely on header-context CSS (documented as AGENTS.md trap #5).
-- **Alternatives rejected:** Removing `backdrop-blur` from the header — visual drift from the reference.
+- **Context:** Dev-server E2E misses build/asset failures (and did: the standalone initially served SSR HTML with 404 chunks — zero hydration); rate limits punish per-test logins; the logout spec destroys server-side sessions.
+- **Decision:** Playwright boots `.next/standalone/server.js` on :3100 against a scratch `db/e2e.db` (global-setup pushes schema + seeds). Two setup projects (`setup-chromium`, `setup-mobile`) each sign in once and persist `tests/e2e/.auth/{chromium,mobile}.json`. The webServer passes an absolute `DATABASE_URL` (ADR-002 pass-through).
+- **Rationale:** Testing the shipped artifact; per-project sessions make projects order-independent despite session-revoking specs; one login per project stays under the 10/15min limiter.
+- **Consequences:** (+) hydration/asset regressions are caught; (−) `npm run build` must precede `npm run test:e2e`.
 
-**ADR-007: Two-layer test architecture (Vitest seams / Playwright production build).**
+**ADR-007: Demo card settlement without a PSP**
 
-- **Context:** Fast feedback on pure logic vs. high-confidence parity on real bundles are different needs.
-- **Decision:** Vitest (node env) owns `*.test.ts` co-located on pure seams (commerce math, db-path) — 22 tests. Playwright owns `tests/e2e/*.spec.ts` (41 specs × 2 projects = 82 runs) against `vite preview` of the production build, one worker, sequential file order.
-- **Rationale:** The singlefile production bundle behaves differently from dev (inlined CSS); testing only dev would leave a verification gap. One worker keeps cart-adjacent specs deterministic without shared-state gymnastics (each test gets a fresh context anyway).
-- **Consequences:** ➕ Deterministic, honest verification; ➖ `npm run e2e` requires `npm run build` first (encoded in docs, not in the script — the gate order is documented).
-- **Alternatives rejected:** Component-testing DOM mocks — they assert mocks, not the shipped artifact.
-
----
+- **Context:** The reference has no payment provider; the clone must demo checkout end-to-end.
+- **Decision:** Card orders are Luhn-validated, only the last 4 digits are stored, and payment is settled immediately (`paymentStatus: "paid"`); COD orders settle as `null` (courier). No real charge path exists.
+- **Rationale:** Demonstrates the full order lifecycle (placed → in_transit → delivered) without SAQ scope or live keys.
+- **Consequences:** (+) zero external integration; (−) obviously not production payment — documented here and in the checkout UI copy ("demo processor, no real charge").
 
 ## 2. High-Level System Topology
 
 ```text
-┌──────────────────────────────────────────────────────────────────────┐
-│ Browser (any static host)                                            │
-│                                                                      │
-│  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ dist/index.html  (~502 KB, single file, no runtime requests)   │  │
-│  │  ├─ inlined JS bundle (React 19 + app + lucide icons)          │  │
-│  │  ├─ inlined CSS (Tailwind v4 @theme output)                    │  │
-│  │  └─ /images/* fetched from the same origin (public assets)     │  │
-│  └────────────────────────────────────────────────────────────────┘  │
-│            │                                                        │
-│            ▼                                                        │
-│  ┌──────────────────────────┐     ┌───────────────────────────────┐ │
-│  │ React tree               │     │ localStorage "homenest.v2"    │ │
-│  │  RouterProvider          │◄───►│  users / sessionUserId        │ │
-│  │  StoreProvider (1 ctx)   │     │  cart / wishlist / orders     │ │
-│  │  PageShell (chrome)      │     │  products / carousel / promo  │ │
-│  │  Routes (27)             │     │  newsletter                   │ │
-│  └──────────────────────────┘     └───────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────┘
-             │                                        ▲
-             ▼ (repo contract only, no runtime I/O)   │ git-ignored
-   DATABASE_URL="file:../db/custom.db"  →  <repoRoot>/db/custom.db
+┌────────────────────────────── Browser (chromium desktop / iPhone-14 profile) ──────────────────────────────┐
+│  RSC payload (force-dynamic pages)  ·  Client islands (header, drawers, wizard)  ·  StoreProvider context   │
+└───────────────┬──────────────────────────────────────────────────────────────────────────┬─────────────────┘
+                │ GET (RSC/nav)                                                            │ POST server actions
+┌───────────────▼──────────────────────────────────────────────────────────────────────────▼─────────────────┐
+│  Next.js 16.4 server (dev: turbopack :3000 · prod: .next/standalone/server.js)                             │
+│  ├─ (storefront) route group: + AnnouncementBar, Header, MobileNav, CartDrawer, SearchOverlay,             │
+│  │                              Newsletter, Footer  (chrome composed in the group layout)                  │
+│  ├─ (auth) route group: chrome-less login/register (measured slate cards)                                  │
+│  ├─ /api/health · /api/search · /api/newsletter                     (the only REST endpoints)              │
+│  ├─ security headers: Referrer-Policy, nosniff, HSTS, X-Frame-Options: DENY (next.config.ts)               │
+│  └─ src/lib/actions/*  ← THE mutation seam (Zod + authz + rate limits + transactions)                      │
+└───────────────┬────────────────────────────────────────────────────────────────────────────────────────────┘
+                │ Prisma 6.19 (datasource URL re-anchored via src/lib/db-path.ts)
+       ┌────────▼─────────┐        ┌──────────────────────────┐
+       │ SQLite (file)    │        │ External (static assets) │
+       │  db/custom.db    │        │  images.unsplash.com     │
+       │  13 models       │        │  (unoptimized passthrough)│
+       └──────────────────┘        └──────────────────────────┘
 ```
 
-- **Client layer:** one SPA, two audiences (storefront + admin console behind a role gate).
-- **Edge/CDN:** any static host; the deployment artifact is one HTML file plus `/images/*`.
-- **Application layer:** in-browser; the "backend" is the store's mutation callbacks.
-- **Data layer:** `localStorage` at runtime; repo-root `db/custom.db` is a pinned contract path with no runtime reader.
-- **External services:** Google Fonts (Playfair Display) at page load; graceful fallback to Georgia if blocked.
-
----
+Single-node, single-process, single-writer. Scaling characteristics are documented in §8.4; the rate limiter is in-memory (per-instance) by the same scope decision.
 
 ## 3. Application Architecture
 
-### 3.1 The Layer Model (Golden Rule)
+### 3.1 The Layer Model
 
 ```
-Layer 3  pages/       route surfaces. Own per-page state only; may call store
-                      callbacks and lib helpers. Never import from components/
-                      except shared chrome primitives.
-Layer 2  components/  chrome.tsx (header/footer/drawers/forms) + product.tsx
-                      (card primitives). Pure presentation + store callbacks.
-Layer 1  lib/         router.tsx, store.tsx, commerce.ts, db-path.ts.
-                      Framework-aware core: no imports from pages/ or components/.
-Layer 0  data/        catalog.ts + types.ts. Pure data + typed lookups. No React.
-
-Golden Rule: dependencies point downward only. lib/ never imports React-DOM
-components; data/ imports nothing but types.
+Layer 0: Database — SQLite file at <repoRoot>/db/custom.db. 13 Prisma models. Money = integer cents.
+Layer 1: Domain seams (src/lib) — pure + server modules: money, db-path, cart (+ cart-dto), auth, rate-limit,
+         validation (Zod), order-token, delivery, products (DTO mapper). Pure modules never import servers.
+Layer 2: Mutation seam (src/lib/actions) — "use server" only. Zod-parse → authz → transaction → ActionResult<T>.
+Layer 3: RSC pages (src/app) — force-dynamic server components; fetch via Prisma, render DTOs; route groups
+         own chrome: (storefront) renders the full chrome, (auth) renders none.
+Layer 4: Client islands (src/components) — interactivity only; state via StoreProvider; mutations via actions.
+Golden rule: data flows DOWN (props), mutations flow UP (actions), and the client never derives money math.
 ```
 
 ### 3.2 Annotated Directory Structure
 
-```
-homenest-store-g/
-├── index.html                    ← entry; Playfair Display link; #root; viewport-fit=cover
-├── vite.config.ts                ← react() + tailwindcss() + viteSingleFile(); @ alias;
-│   │                               optimizeDeps.entries excludes the vendored skills/ tree
-├── vitest.config.ts              ← node env; src/**/*.test.ts + tests/**/*.test.ts
-├── playwright.config.ts          ← preview server :4173; chromium + mobile projects; 1 worker
-├── tsconfig.json                 ← strict; noUnusedLocals/Parameters; @/* → src/*
-├── .env                          ← DATABASE_URL="file:../db/custom.db" (git-ignored)
-├── db/
-│   └── catalog.json              ← brand config (name, promo code) — seed metadata
-├── public/images/                ← product/hero imagery (absolute /images/... paths)
-├── src/
-│   ├── App.tsx                   ← RouterProvider → StoreProvider → PageShell → Routes (27)
-│   ├── main.tsx                  ← createRoot render
-│   ├── types.ts                  ← CategoryId (8), Product, CartLine, Address, User,
-│   │                               Order(OrderStatus ×7), CarouselSlide, ToastMessage
-│   ├── index.css                 ← @theme tokens (colors/shadows/radii) + base + a11y
-│   ├── components/
-│   │   ├── chrome.tsx            ← Header (+ portaled mobile menu), CartDrawer, Toaster,
-│   │   │                           ChatButton, Footer, FeatureBar, PageShell, Field,
-│   │   │                           inputClass, PrimaryButton, OutlineButton
-│   │   └── product.tsx           ← Stars, ProductCard (badges + quick-add), ProductGrid
-│   ├── data/catalog.ts           ← BRAND, CATEGORIES (8), PRODUCTS (24), CAROUSEL (3),
-│   │                               DEMO_USERS (customer + admin), nav/footer link sets,
-│   │                               productBySlug/productById/relatedProducts
-│   ├── lib/
-│   │   ├── router.tsx            ← RouterProvider/useRouter/useQuery/Link/matchPath
-│   │   ├── store.tsx             ← StoreProvider: state, persistence (homenest.v2),
-│   │   │                           cart/wishlist/auth/orders/promo/toast mutations
-│   │   ├── commerce.ts           ← money + shipping + promo + tax + validation +
-│   │   │                           card formatting + tracking URLs + delivery windows
-│   │   ├── commerce.test.ts      ← 14 unit tests on the seams above
-│   │   └── db-path.ts            ← schema-relative DATABASE_URL resolution (ADR-002)
-│   └── pages/
-│       ├── home.tsx              ← hero carousel, FeatureBar, categories, featured/new, CTA
-│       ├── shop.tsx              ← ProductsPage (URL-driven filters), ProductPage, 404
-│       ├── checkout-flow.tsx     ← CartPage, CheckoutPage (COD + card), OrderSuccessPage
-│       ├── account-pages.tsx     ← AuthCard, AccountPage (4 tabs), AccountOrderPage,
-│       │                           TrackOrderPage + OrderProgress stepper
-│       ├── content-pages.tsx     ← About, Contact, 5 legal pages
-│       └── admin-pages.tsx       ← AdminFrame role gate + 7 console surfaces
-└── tests/
-    ├── db-path.test.ts           ← DB URL contract (8 tests)
-    └── e2e/
-        ├── smoke.spec.ts         ← 5 chrome/route invariants
-        ├── mobile-navigation.spec.ts ← 8 menu behaviors (the parity-critical surface)
-        ├── catalog.spec.ts       ← 6 search/filter/sort/stepper behaviors
-        ├── cart-checkout.spec.ts ← 9 COD flow behaviors incl. token gate + tracking
-        ├── auth-admin.spec.ts    ← 7 auth/redirect/role-gate behaviors
-        └── visual-parity.spec.ts ← 6 computed-style build-breakers
+```text
+luxury-fashion-store/
+├── AGENTS.md / CLAUDE.md / README.md / Project_Architecture_Document.md
+├── next.config.ts              ← standalone output, dev-origin allowlist, security headers
+├── playwright.config.ts        ← standalone E2E on :3100, per-project auth, absolute e2e DB URL
+├── vitest.config.ts            ← unit layer (matches *.test.ts only)
+├── .env                        ← DATABASE_URL (schema-relative), AUTH_SECRET, NEXT_PUBLIC_SITE_URL
+├── db/                         ← git-ignored; custom.db (dev) + e2e.db (E2E scratch)
+├── prisma/
+│   ├── schema.prisma           ← 13 models, SQLite, no enums (Zod-validated strings)
+│   └── seed.ts                 ← deterministic (fixed scrypt salts) + idempotent (upserts)
+├── scripts/
+│   └── assemble-standalone.mjs ← postbuild: copies .next/static + public/ into the bundle
+├── public/fonts/               ← self-hosted Cormorant Garamond + Montserrat (woff2)
+├── docs/
+│   ├── screenshots/            ← dev-server captures (parity evidence)
+│   └── legacy-homenest/        ← archived Vite-SPA lineage (sessions, remediation history)
+├── tests/e2e/                  ← Playwright: 9 spec files + global-setup + auth.setup
+└── src/
+    ├── app/
+    │   ├── layout.tsx          ← minimal root shell (fonts, metadata)
+    │   ├── globals.css         ← Tailwind v4 @theme (hsl literals), @font-face, v4 trap pins
+    │   ├── not-found.tsx       ← measured 404 card
+    │   ├── (auth)/login|register/page.tsx     ← chrome-less, force-dynamic, redirect-aware
+    │   ├── (storefront)/layout.tsx            ← chrome composition point + StoreProvider init
+    │   ├── (storefront)/page.tsx              ← home: 12 sections in reference order
+    │   ├── (storefront)/shop/                 ← PLP (functional superset; deep-linkable filters)
+    │   ├── (storefront)/product/[slug]/       ← PDP + JSON-LD + related row
+    │   ├── (storefront)/cart/ checkout/ checkout/success/ wishlist/
+    │   ├── (storefront)/account/ account/orders/[id]/
+    │   ├── (storefront)/admin/ admin/orders/[id]/ admin/products/
+    │   └── api/health|search|newsletter/route.ts
+    ├── components/
+    │   ├── store/              ← header, mobile-nav, cart-drawer, search-overlay, product-card,
+    │   │                          product-detail, hero-carousel, shop-client, cart-page-client,
+    │   │                          footer, newsletter, announcement-bar, store-provider, ...
+    │   ├── checkout/           ← 3-step wizard (client)
+    │   ├── account/            ← tabs (orders/addresses/profile/settings), auth-form
+    │   └── ui/                 ← shadcn-style primitives (button, input, tabs, ...)
+    └── lib/
+        ├── db.ts / db-path.ts  ← Prisma singleton + URL re-anchoring (ADR-002)
+        ├── cart.ts / cart-dto.ts ← server cart domain / pure DTO contract (ADR split)
+        ├── auth.ts             ← scrypt, sessions, SafeUser, isAdmin
+        ├── actions/            ← auth, cart, wishlist, checkout, account, admin ("use server")
+        ├── action-result.ts    ← { ok, data | error{message, fieldErrors} } envelope
+        ├── validation.ts       ← Zod schemas + validateRedirectPath + isLuhnValid
+        ├── rate-limit.ts       ← in-memory fixed-window limiter
+        ├── order-token.ts      ← HMAC guest order-view capability tokens
+        ├── money.ts / delivery.ts / products.ts
+        └── data/catalog.ts     ← reference-extracted catalog, slides, menus, demo users
 ```
 
 ### 3.3 Critical Code Patterns
 
-**Pattern 1 — Ready-gated role guard** (`src/pages/admin-pages.tsx`):
+**Pattern 1 — The action envelope (every write looks like this):**
 
-```tsx
-function AdminFrame({ title, children }: { title: string; children: ReactNode }) {
-  const { user, ready } = useStore();
-  const { path, navigate } = useRouter();
-
-  useEffect(() => {
-    // Gate on `ready`: on a hard refresh the persisted session hydrates after
-    // mount — navigating before that kicks logged-in admins out to /login.
-    if (ready && !user) navigate(`/login?redirect=${encodeURIComponent(path)}`);
-  }, [navigate, path, ready, user]);
-
-  if (!ready || !user) return null;
-  if (user.role !== "admin") {
-    return <div>…Staff only…</div>;
-  }
-  return (/* admin console chrome */);
+```typescript
+// src/lib/actions/cart.ts — server truth wins; the client never computes totals.
+export async function addToCartAction(productId: string, size: string, quantity: number)
+  : Promise<ActionResult<CartDto>> {
+  const parsed = cartAddSchema.safeParse({ productId, size, quantity }); // 1. Zod at the seam
+  if (!parsed.success) return fail("Invalid bag request.");
+  const user = await getCurrentUser();                                   // 2. authz context
+  // 3. DB writes (guest token rows mint 192-bit tokens; stock clamps)
+  revalidatePath("/", "layout");                                         // 4. RSC freshness
+  const dto = await getCartDto(user?.id ?? null);                        // 5. server-derived DTO
+  return ok(dto);                                                        // 6. envelope back
 }
 ```
 
-*Why:* the store hydrates asynchronously by design (ADR-004); guards must observe `ready` or they act on the seed's `sessionUserId: null`. Found as a real bug by E2E; the specs pin it.
+*Why:* one auditable shape for all 15+ actions; the caller pattern (`startTransition` → `setCart(res.data)`) is identical everywhere.
 
-**Pattern 2 — Portaled mobile menu** (`src/components/chrome.tsx`):
+**Pattern 2 — Adjust-state-during-render (React Compiler-safe re-sync):**
 
-```tsx
-{typeof document !== "undefined" &&
-  createPortal(
-    menuOpen ? (
-      <div className="fixed inset-x-0 top-16 z-[350] md:hidden" id="mobile-nav-holder">
-        <button className="fixed inset-0 top-16 -z-10 … bg-white/70 …"
-                aria-label="Close menu overlay" onClick={() => setMenuOpen(false)} />
-        <nav id="mobile-nav" aria-label="Mobile" className="… bg-card …">
-          {/* search form + link rows; active row = bg-primary pill */}
-        </nav>
-      </div>
-    ) : null,
-    document.body,
-  )}
-```
-
-*Why:* the sticky header's `backdrop-blur-sm` creates a containing block for fixed descendants (Tailwind v4 trap #5); portaling escapes it. The dropdown-panel shape, green close disc, and orange active pill are parity-pinned by `tests/e2e/mobile-navigation.spec.ts`.
-
-**Pattern 3 — Delta-based, stock-clamped cart mutation** (`src/lib/store.tsx` + `src/lib/commerce.ts`):
-
-```ts
-export function mergeCartLine(lines: CartLine[], productId: string, delta: number, stock: number): CartLine[] {
-  const existing = lines.find((line) => line.productId === productId);
-  if (!existing) {
-    const quantity = clampQuantity(delta, stock);       // clamps to [0, stock]
-    if (quantity <= 0) return lines;
-    return [...lines, { productId, quantity }];
-  }
-  const quantity = clampQuantity(existing.quantity + delta, stock);
-  if (quantity <= 0) return lines.filter((line) => line.productId !== productId);
-  return lines.map((line) => (line.productId === productId ? { ...line, quantity } : line));
+```typescript
+// src/components/store/store-provider.tsx — server props re-sync WITHOUT effects.
+const [cart, setCartState] = useState<CartDto>(initialCart);
+const [lastCartProps, setLastCartProps] = useState<CartDto>(initialCart);
+if (initialCart !== lastCartProps) {     // identity change from router.refresh()
+  setLastCartProps(initialCart);
+  setCartState(initialCart);             // React re-renders immediately; no effect needed
 }
 ```
 
-*Why:* steppers submit deltas against the current line, and the clamp is applied inside the reducer — rapid clicks and out-of-stock adds cannot corrupt state. Unit-pinned in `commerce.test.ts`.
+*Why:* `react-hooks/set-state-in-effect` is an error in this repo; this is the officially sanctioned pattern and survives the React Compiler.
 
-**Pattern 4 — Token-gated order success** (`src/pages/checkout-flow.tsx`):
+**Pattern 3 — The guest↔user identity bridge:**
 
-```ts
-const order = orders.find(
-  (item) => item.number === number && (item.guestToken === token || item.userId === user?.id),
-);
+```typescript
+// src/lib/cart.ts — carts/wishlists are keyed by a unique token, not by userId alone.
+// user-owned rows ALSO mint tokens, so the row is addressable before/after claiming.
+const created = await db.cart.create({ data: { userId, token: randomBytes(24).toString("hex") } });
 ```
 
-*Why:* guest confirmation links carry a capability token (`?order=&token=`); unknown pairs render a calm "We cannot show that order" instead of confirming existence. Owners reach the same order through `userId` without the token.
+*Why:* the guest cookie and the user row speak the same key language; login merges guest rows (quantity-max union) then deletes them.
 
-**Pattern 5 — URL-driven catalog filters** (`src/pages/shop.tsx`):
+**Pattern 4 — DTO contract split (client-safe types):**
 
-```ts
-const setParams = (nextCategory: string, nextSearch: string) => {
-  const params = new URLSearchParams();
-  if (nextCategory && nextCategory !== "all") params.set("category", nextCategory);
-  if (nextSearch.trim()) params.set("search", nextSearch.trim());
-  const qs = params.toString();
-  navigate(qs ? `/products?${qs}` : "/products", { replace: true });
-};
+```typescript
+// src/lib/cart-dto.ts — PURE module (no server imports). Types + EMPTY constants only.
+// src/lib/cart.ts — server-only (next/headers, Prisma) and re-exports the DTOs:
+export type { CartLineDto, CartDto, WishlistDto } from "@/lib/cart-dto";
+export { EMPTY_CART, EMPTY_WISHLIST } from "@/lib/cart-dto";
 ```
 
-*Why:* the URL is the single source of truth for search/category (live as-you-type via `replace: true`), so deep links, the header-search handoff (`/products?search=`), and back-button behavior all work identically.
+*Why:* `StoreProvider` (client) must import `CartDto`; importing the server module pulls `next/headers` into the browser graph — Turbopack fails the build. The split keeps one naming surface with two ownership zones.
 
----
+**Pattern 5 — Wizard values survive unmounting:**
+
+```typescript
+// src/components/checkout/checkout-flow.tsx — card fields live in STATE, not the DOM:
+const [card, setCard] = useState({ number: "", expiry: "", cvc: "" }); // controlled inputs
+// step 2 unmounts the step-1 inputs; submit() reads `card`, never getElementById.
+```
+
+*Why:* the review step renders only a summary; DOM-reading at submit time returned null and silently broke every card order (caught by E2E, fixed at the root).
 
 ## 4. Data Architecture
 
-### 4.1 Runtime Store (localStorage `homenest.v4`)
+### 4.1 Database Schema (13 models)
 
-| Field | Type | Notes |
+```mermaid
+erDiagram
+    User ||--o{ Session : has
+    User ||--o{ Address : has
+    User ||--o| Cart : owns
+    User ||--o| Wishlist : owns
+    User ||--o{ Order : places
+    Cart ||--o{ CartItem : contains
+    Wishlist ||--o{ WishlistItem : contains
+    Product ||--o{ CartItem : "in bags"
+    Product ||--o{ WishlistItem : "in wishlists"
+    Product ||--o{ OrderItem : "on orders"
+    Category ||--o{ Product : groups
+    Order ||--o{ OrderItem : contains
+    Order ||--o{ OrderEvent : timeline
+```
+
+| Model | Key columns | Notes |
 |---|---|---|
-| `users` | `User[]` | Seeded with demo customer + admin; registrations append. Passwords are salted WebCrypto digests (§6.2) — never plaintext at rest. |
-| `sessionUserId` | `string \| null` | Session pointer; `logout()` nulls it explicitly. |
-| `cart` | `CartLine[]` | `{ productId, quantity }`; quantities clamped to live stock on every mutation. |
-| `wishlist` | `string[]` | Product ids. |
-| `orders` | `Order[]` | Newest-first; snapshots everything needed for history rendering. |
-| `products` | `Product[]` | Seed catalog + admin overrides (stock, visibility). |
-| `carousel` | `CarouselSlide[]` | Admin-editable hero slides. |
-| `promoCode` | `string \| null` | Applied code (NEST10). |
-| `newsletter` | `string[]` | Subscribed emails. |
+| `User` | email (unique), passwordHash (`s1$salt$hash`), role (`user`\|`admin`, Zod-checked) | demo: james (customer), admin |
+| `Session` | userId, expiresAt, id (cuid in HMAC cookie) | logout deletes the row |
+| `Address` | userId, label, fullName, street…, isDefault | checkout prefill source |
+| `Category` | slug, label, sortOrder | 4: women, men, accessories, shoes |
+| `Product` | slug, brand, price/compareAtPrice (cents), discount, sizes/colors/images (JSON strings), rating, reviewCount, isNew/isBestseller, stock, isActive, sortOrder | 12 seeded = catalog array order |
+| `Cart` / `Wishlist` | **token (unique)**, userId (unique, nullable) | token = row identity for guest AND user rows |
+| `CartItem` | cartId, productId, size, quantity | unique `(cartId, productId, size)` |
+| `WishlistItem` | wishlistId, productId | unique pair |
+| `Order` | number (`ORD-YYYY-NNN`), userId (nullable = guest), email, status, subtotal/shipping/total (cents), shippingAddress (JSON), paymentMethod, cardLast4, paymentStatus | guest views gated by HMAC token |
+| `OrderItem` | orderId, productId, name/brand/image/size/unitPrice snapshots | immutable at purchase time |
+| `OrderEvent` | orderId, type, createdAt | status timeline (placed → …) |
+| `NewsletterSubscriber` | email (unique) | `/api/newsletter` |
 
-`STORAGE_KEY` is **versioned** (`homenest.v4`, session 5 — the seed now ships hashed demo credentials): bump it whenever the persisted shape or the seed catalog changes, otherwise stale client data shadows the new seed (observed during the redesign). The pairing is enforced by `tests/catalog-hash.test.ts` + `tests/catalog-registry.json`.
+### 4.2 Persistence Strategy
 
-### 4.2 Domain Types (summary)
-
-- `Product`: id, slug, category (8-value union), `priceCents`, `compareAtCents | null`, rating, reviewCount, stock, visibility/featured/isNew flags, image, gallery, badge, materials, features (rendered as PDP tag pills), description, shippingNote.
-- `Order`: id, `ORD-YYYY-NNN` number, `userId | null`, email, placedAt, status (7-value union), item snapshots (`OrderItem` with name/image/unitCents), subtotal/discount/shipping/total cents, promoCode, shippingAddress snapshot, `paymentLast4` (`"COD"` for cash), carrier + trackingNumber, timeline events, guestToken.
-- Money: integer cents end-to-end; `formatMoney` renders `$X.YZ` at display only.
-
-### 4.3 Derived Commerce Math (single seam, unit-pinned)
-
-`cartTotals(lines, products, code)` → subtotal → promo (NEST10: 10% off a ≥ $40 merchandise subtotal) → shipping (free ≥ $50, flat $9.99 under, $0 empty) → tax (0 bps — the reference shows no tax line) → total. Reference-measured thresholds live as exported constants; changing them is a parity decision, not a refactor.
-
-### 4.4 Persistence Strategy
-
-Writes are whole-state `JSON.stringify` after each mutation (debounce unnecessary at this size); reads tolerate missing keys, unknown shapes (`Partial<PersistedState>`), and JSON errors by falling back to seed. There is no migration path by design — the versioned key replaces it.
-
----
+- **Connection:** single `PrismaClient` singleton (HMR-safe `globalThis` cache); SQLite WAL defaults; no pool tuning needed at single-writer scope.
+- **URL resolution:** every process re-anchors `DATABASE_URL` through `src/lib/db-path.ts` (ADR-002). E2E/deployments use absolute URLs (pass-through).
+- **Transactions:** `placeOrderAction` re-reads stock, decrements it, allocates the order number (`count+1`, zero-padded, race-free on single-writer SQLite), and writes order+items+event atomically inside `db.$transaction`. Oversell throws `STOCK_SHORT` and fails the action.
+- **Migrations:** `prisma db push` (prototype cadence). Seed is deterministic + idempotent; `db:setup` = push + seed.
+- **Caching:** none — all routes `force-dynamic`; the client store mirrors action responses. `placeOrderAction` deliberately skips `revalidatePath` (it would re-render `/checkout` mid-action and its empty-cart `redirect("/cart")` races the success navigation).
 
 ## 5. Design System Reference
 
 ### 5.1 Typographic System
 
-| Role | Face | Weights | Notes |
+| Role | Face | Usage |
+|---|---|---|
+| Display / headings | Cormorant Garamond 300–600 (+italics), class `font-cormorant` | Logo (30px, ls 9px), section h2 (48–60px), PDP h1, prices in serif contexts |
+| Body / UI | Montserrat 200–700, class `font-montserrat` | 16px/24px base; kickers `text-[10px] tracking-[0.3em] uppercase`; nav `text-xs tracking-[0.15em] uppercase` |
+
+Both are self-hosted woff2 in `public/fonts/` with `@font-face` + `font-display: swap` in `globals.css` — no runtime Google Fonts dependency.
+
+### 5.2 Color Tokens (extracted from the reference `:root`; v4 literals)
+
+| Token | Value (hsl) | Computed anchor | Usage |
 |---|---|---|---|
-| Display | Playfair Display | 700 (800 for hero numerals) | Product names, page titles, footer column titles; loaded via Google Fonts with Georgia fallback |
-| Body | System sans (`ui-sans-serif, system-ui, …`) | 400–700 | Matches the reference's body stack exactly; no webfont cost |
-| Mono | System mono | 400 | Order numbers in legacy surfaces only |
+| background | `hsl(30 15% 97%)` | rgb(248,247,246) | page ground |
+| foreground / primary | `hsl(25 15% 8%)` | rgb(23,20,17) | ink, header, footer |
+| secondary | `hsl(30 20% 93%)` | — | subtle fills |
+| muted-foreground | `hsl(25 10% 45%)` | — | secondary copy |
+| accent / gold | `hsl(35 60% 55%)`, gold `hsl(42 75% 52%)` | — | SALE link, kickers, hover |
+| border / input | `hsl(30 15% 88%)` | rgb(229,224,220) | hairlines |
+| cream | `hsl(38 40% 96%)` | — | alternating section bands |
+| destructive | `hsl(0 84.2% 60.2%)` | — | form errors, remove |
 
-Scale: page titles `text-4xl/5xl`, card titles `text-lg`, labels `text-sm`, category eyebrows `text-[11px] uppercase tracking-[0.14em] text-primary`.
-
-### 5.2 Color Tokens (measured 2026-10-12)
-
-| Token | CSS value | Computed (build) | Usage | WCAG note |
-|---|---|---|---|---|
-| `background` | `hsl(30 25% 98%)` | `rgb(251,250,249)` | Page canvas | — |
-| `foreground` | `hsl(20 15% 10%)` | `rgb(26,23,21)` | Primary text | 15.9:1 on background |
-| `primary` | `hsl(24 70% 50%)` | `rgb(217,110,38)` | CTAs, active nav pill, cart badge, quick-add hover | white text on primary ≈ 3.2:1 (large/bold + icon-paired) |
-| `primary-dark` | `hsl(24 70% 43%)` | — | Hover state | — |
-| `muted` | `hsl(30 15% 94%)` | — | Search fields, placeholders surfaces | — |
-| `muted-foreground` | `hsl(20 10% 45%)` | — | Secondary text | ≈ 7:1 on background |
-| `accent` | `hsl(160 40% 45%)` | `rgb(69,161,130)` | In-stock, Free shipping (the mobile menu trigger flipped back to a bare dark icon in session 27 — no longer an accent-disc surface) | white text used only on accent badges (decorative) |
-| `destructive` | `hsl(0 72% 51%)` | `rgb(220,40,40)` | Discount pills, form errors | white text 4.6:1 |
-| `badge` | — | `rgb(245,159,10)` | "Featured" pill, filled stars | white bold text on amber is decorative/large |
-| `border` | `hsl(30 15% 88%)` | — | Card/field borders | — |
-| `card` | `hsl(0 0% 100%)` | `rgb(255,255,255)` | Card surfaces | — |
-| `panel` | `hsl(0 0% 100% / 0.8)` | `rgba(255,255,255,0.8)` | Mobile menu panel (alpha baked into the token — v4 `/NN` modifiers color-mix in oklab; trap T-13) | — |
-| `footer` | — | `rgb(32,27,24)` | Footer canvas | white/60 body text |
-| `accent-soft` | `hsl(160 40% 95%)` | — | Success icon wash | — |
+⚠️ The reference ships these as **bare HSL triplets** (v3 style). In v4 they MUST be full `hsl()` literals in `@theme inline` — bare triplets resolve transparent. This is pinned in `globals.css` comments and `AGENTS.md`.
 
 ### 5.3 Component Primitives
 
-No headless-UI library: primitives are hand-rolled and parity-pinned — `PrimaryButton`/`OutlineButton` (h-12 rounded-full pills), `Field`+`inputClass` (h-12 rounded-lg, danger border on error), `Stars` (5-star row, `fill-badge` for filled, `(count)` suffix), `ProductCard` (red −% pill + amber Featured pill stack top-left, circular quick-add bottom-right of the image, orange category eyebrow, Playfair name, price + strikethrough), `OrderProgress` (vertical 5-step stepper with connector line and `(Current)` marker), `CodNotice` (amber info box), toasts (white card, bottom-right, 3.2s).
+shadcn-style local primitives in `src/components/ui/` (button, input, label, tabs, card, separator) — Radix behavior without a registry dependency; styled to the measured geometry (e.g. size chips `text-[10px] px-2.5 py-1.5 border-border`, active = `border-foreground`). Icons: lucide-react, stroke width 2, 18–20px header cluster.
 
-### 5.4 Motion
+### 5.4 Motion / Animation
 
-Hero cross-fade (700ms opacity), carousel auto-advance (7s, cleared when <2 slides), card hover scale (`motion-safe:` prefixed), color transitions 200–300ms. Global `prefers-reduced-motion` kill-switch in `index.css`.
-
-### 5.5 Z-Index Scale
-
-`--z-sticky: 300` (header) · `--z-dropdown: 350` (mobile menu panel) · `--z-overlay: 400` · `--z-modal: 500` (cart drawer) · `--z-toast: 800`. Literal z-arbitrary values in components mirror these (`z-[300]`, `z-[350]`, `z-[500]`, `z-[800]`).
-
-### 5.6 Registered Divergences From the Reference (do not "fix")
-
-These supersets are intentional; they must not change the **resting visuals** of parity surfaces:
-
-1. 24-product catalog (reference shows 8) with 16 additional products; the 8 reference products keep exact names, cents prices, ratings, and review counts.
-2. Collapsed "Have a promo code?" entry in the cart summary (NEST10 — 10% off $40+).
-3. Second payment option ("Credit / Debit Card") beneath the COD radio; COD remains default-selected.
-4. Wishlist (saved products tab in the account page; store-backed).
-5. Full admin console at `/admin/*` (role-gated) — the reference exposes none.
-6. Estimated delivery window (`deliveryWindow`) on success/tracking surfaces.
-7. Chat FAB bottom-right navigates to `/contact` (the reference's FAB opens a platform widget).
-8. Demo login/register pages with email+password (the reference delegates to the Base44 platform auth screen).
-9. Order numbers are `ORD-YYYY-NNN` sequential (the reference generates `ORD-XXXXXXXX` random) — sequential numbers are friendlier for support flows.
-10. "Sign in" row in the mobile menu (the reference's menu lists the five nav links only) — the demo auth entry point; the reference delegates auth to its platform screen.
-11. The mobile menu panel does NOT dim the page beneath it (session-3 re-measurement of the live reference; the session-1 measurement read a dim that is no longer present). Scroll-lock and the focus trap remain.
-12. Color-contrast pairs on parity surfaces (white-on-orange CTAs, white-on-amber "Featured" pills, orange category labels, muted grays) match the reference tokens and fail WCAG AA contrast — documented exclusion from the axe gate (remediation plan §9.2 R3-04).
-13. The mobile menu's search control is a compact muted pill at rest (session-4 measurement, matching the reference) that expands into a working search input on tap — the reference's pill is functionally inert (and unclickable: the reference's own toast viewport covers it). Resting visuals match; function exceeds (registered superset).
-14. **SEO posture superset (session 8, extended session 18).** The reference's robots.txt disallows nothing and its sitemap.xml lists `/admin/*`, `/account`, `/cart` with zero product URLs; the clone disallows private surfaces and lists every visible product as `/products/{slug}`. The reference ships no web app manifest (re-measured 2026-10-13: no `<link rel="manifest">` in its head; `/manifest.webmanifest` and `/site.webmanifest` are answered by the SPA catch-all with `text/html`). The clone ships a valid minimal manifest (`public/manifest.webmanifest`, R18-01): name/short_name, root-relative `start_url`/`scope`, `standalone` display, theme/background `#fbfaf9`, and the two install-required 192px/512px icons reusing the FAVICON-1 CDN logo; a `transformIndexHtml` post-hook in `vite.config.ts` restores the root-absolute href that viteSingleFile's `base: "./"` would otherwise relativize into a deep-route 404.
-15. **Per-route head superset (session 8).** The reference ships a static-title map for 23 paths (PDPs keep the static title, admin titles leak an `admin/` namespace artifact); the clone pins the same map (incl. the "Order Tracking" / "Terms Of Service" quirks) and extends it: PDP → "{Product} | HomeNest Kitchen", humanized unknown slugs, auth/not-found titles, admin titles cleaned. Canonical links + per-route og:url and per-PDP Product JSON-LD are additive (the reference has none).
-
----
+Hero crossfade `transition-opacity duration-700`, auto-rotate 5000ms; drawers/overlays render via conditional mount (no measured reference motion to replicate); `prefers-reduced-motion` respected by Tailwind transitions. The 404/hero arrows/dots geometry (w-10 h-10 arrows, w-2 h-[2px] dots active w-8) is pinned from measurement.
 
 ## 6. Security Architecture
 
-### 6.1 Security Rules & Enforcement
+### 6.1 Security Rules
 
 | Rule | Enforcement |
 |---|---|
-| Validate all external input at the boundary | `lib/commerce.ts` validators (`isEmail`, `isZip`, `isCardNumberValid`, `isExpiryValid`) called before mutations; native `required`/`minLength` on forms |
-| No open redirects | `validateRedirectPath` rejects non-`/` paths, `//…`, and `://…`; pinned in unit + E2E (`open-redirect attempts fall back to /account`) |
-| Guest order views are capability-gated | `guestToken` + order number must both match; owners bypass via `userId`; E2E pins tamper rejection |
-| Role checks at the surface, not the link | `AdminFrame` re-checks `user.role` on every admin route; customers receive a calm "Staff only" surface (E2E-pinned) |
-| No `dangerouslySetInnerHTML` anywhere | Grep-verified; React escaping only |
-| Stock integrity | Every cart write re-clamps against current stock (`clampQuantity`); placement rejects over-stock with per-line messaging |
-| Money integrity | Totals always re-derived server-side-equivalent (`cartTotals`) — never trusted from component props or URL |
+| All writes via server actions (no ad-hoc endpoints) | `"use server"` modules only; REST = 3 whitelisted read routes |
+| Every input Zod-validated at the seam | `src/lib/validation.ts`; actions reject before touching the DB |
+| Passwords never stored/returned in plaintext | scrypt `s1$salt$hash`; only `SafeUser` crosses to the client |
+| Sessions revocable + HMAC-protected cookies | DB `Session` rows; httpOnly/sameSite=lax/secure-in-prod |
+| Rate-limited unauthenticated writes | login 10/15min, register, newsletter, checkout (in-memory fixed window) |
+| Open-redirect defense on auth redirects | `validateRedirectPath` (same-origin, no `//`, no CRLF) |
+| Guest order pages need capability tokens | HMAC `orderViewToken` (sequential numbers are not capabilities) |
+| Stock oversell impossible | re-read + decrement inside the checkout transaction |
+| Clickjacking / sniffing / referrer hardening | `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy` via next.config headers |
+| Card data minimization (demo PSP) | Luhn check; only last 4 stored; no PAN persistence |
 
 ### 6.2 Authentication & Authorization
 
-Email + password against the seeded/registered user list; session = `sessionUserId` pointer in the store (persisted). Two roles: `customer`, `admin`. Login honors a validated `redirect` param; register auto-signs-in; logout nulls the session pointer and returns to `/`.
+- **Login:** scrypt verify → create `Session` row → signed httpOnly cookie (`aurelia_session`) → merge guest cart/wishlist (quantity-max union) → `redirect` validated path.
+- **Authorization:** `getCurrentUser()` re-hydrates from the session row per request; admin pages additionally call `isAdmin()` server-side on every request (role never trusted from the client).
+- **Ownership checks:** cart/wishlist/admin actions verify row ownership (guest rows via cookie token, user rows via userId).
 
-**Password-at-rest (session 5, R5-01).** Records store `passwordHash: "s1$<salt>$<sha256(salt:password)>"` — a salted WebCrypto SHA-256 digest (see `src/lib/password.ts`; 16-byte CSPRNG salt per record). `login`/`register`/`changePassword` are async and verify through `verifyPassword`, which also accepts legacy plaintext records so pre-v4 clients keep working; such records are re-hashed **in place on the next successful login** (upgrade-on-login). The shipped demo seed is pre-hashed. SHA-256 is not a KDF — this is defense-in-depth against casual localStorage disclosure, not a replacement for the server-backed auth workstream (§6.3).
+### 6.3 Threat Model (top vectors)
 
-### 6.3 Threat Model & Accepted Residual Risks (honest, demo-scoped)
-
-| Vector | Mitigation | Residual risk |
-|---|---|---|
-| Credential theft | Nothing leaves the browser; passwords stored as salted WebCrypto digests (session 5, R5-01) | **Reduced but accepted:** SHA-256 is fast (not a KDF), and a client-only store cannot rate-limit or revoke credentials — the server-backed workstream (ADR-001) remains the real fix. Demo seed salts are static by construction (the seed is static) |
-| Guest token forgery | 128-bit CSPRNG token (`crypto.getRandomValues`, hex) | Low: session 3 replaced the former ~59-bit `Math.random` token (R3-02); forgeability now requires brute-forcing 2¹²⁸ |
-| XSS | React escaping only | Low: no HTML injection surfaces exist |
-| Payment fraud | No real payments | None: card fields never leave the page; COD is simulated |
-| Supply chain | `npm audit fix` applied | **Accepted:** 3 high advisories remain in `braces`/`micromatch` via `vite-plugin-singlefile`'s build-time globbing — no runtime exposure, inputs are trusted repo files; downgrading the plugin would be a breaking change |
-
----
+| Vector | Mitigation |
+|---|---|
+| Credential stuffing / brute force | rate limiter + scrypt cost |
+| Session theft | httpOnly + sameSite=lax + secure(prod) + HMAC integrity |
+| CSRF on mutations | Next server actions' origin-checked POST + sameSite cookies |
+| IDOR on orders | owner (userId) or HMAC view token; admin role re-checked per request |
+| XSS | React escaping; no `dangerouslySetInnerHTML` except JSON-LD built from trusted catalog data |
+| SQL injection | Prisma parameterized queries only |
+| Open redirect at login | `validateRedirectPath` allowlist |
 
 ## 7. Testing Strategy
 
@@ -447,177 +387,127 @@ Email + password against the seeded/registered user list; session = `sessionUser
 
 | Category | Files | Tests | Location | Framework |
 |---|---|---|---|---|
-| Commerce seam units | 1 | 15 | `src/lib/commerce.test.ts` | Vitest (node) |
-| DB URL contract | 1 | 8 | `tests/db-path.test.ts` | Vitest (node) |
-| Catalog ↔ storage-key registry | 1 (+ registry JSON) | 2 | `tests/catalog-hash.test.ts` | Vitest (node) |
-| Password-at-rest contract | 1 | 8 | `tests/password.test.ts` | Vitest (node) |
-| Route-head seam (R8-05) | 1 | 29 | `tests/seo.test.ts` | Vitest (node) |
-| Robots/sitemap artifacts (R8-01/02/03) | 1 | 33 | `tests/sitemap.test.ts` | Vitest (node) |
-| db scripts contract (R26-03) | 1 | 9 | `tests/db-scripts.test.ts` | Vitest (node) |
-| Smoke | 1 | 5 | `tests/e2e/smoke.spec.ts` | Playwright |
-| Mobile navigation (incl. session-27 bare-icon trigger pins) | 1 | 14 | `tests/e2e/mobile-navigation.spec.ts` | Playwright |
-| Mobile header parity (incl. session-26 account-icon pins) | 1 | 5 | `tests/e2e/mobile-header-parity.spec.ts` | Playwright |
-| Cart drawer modal | 1 | 3 | `tests/e2e/cart-drawer.spec.ts` | Playwright |
-| Catalog | 1 | 6 | `tests/e2e/catalog.spec.ts` | Playwright |
-| Cart & checkout | 1 | 9 | `tests/e2e/cart-checkout.spec.ts` | Playwright |
-| Auth & admin | 1 | 7 | `tests/e2e/auth-admin.spec.ts` | Playwright |
-| Visual parity | 1 | 6 | `tests/e2e/visual-parity.spec.ts` | Playwright |
-| A11y smoke (axe) | 1 | 8 | `tests/e2e/a11y-smoke.spec.ts` | Playwright |
-| Search combobox keyboard (R5-02) | 1 | 5 | `tests/e2e/search-keyboard.spec.ts` | Playwright |
-| Password at rest E2E (R5-01) | 1 | 4 | `tests/e2e/password-hash.spec.ts` | Playwright |
-| Account header layout (R5-06) | 1 | 1 | `tests/e2e/account-layout.spec.ts` | Playwright |
-| SEO head gate (R8-06) | 1 | 19 | `tests/e2e/seo-head.spec.ts` | Playwright |
-| **Total** | **20** | **104 unit tests + 98 E2E specs → 300 runs** (104 × 1 + 98 × 2 projects) | | |
+| Unit (pure seams) | 6 | 52 | `src/lib/*.test.ts` | Vitest (node) |
+| E2E setup | 1 | 1×2 projects | `tests/e2e/auth.setup.ts` | Playwright |
+| E2E functional | 9 | 62 runs | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
+
+E2E coverage map: home (hero/sections/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related) · cart+checkout (drawer steppers, empty state, totals, COD end-to-end) · auth (login card, wrong-password alert, register validation, logout) · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px, stacking, navigation, Escape/backdrop close)** · admin (role gate + console pages).
 
 ### 7.2 Test Patterns
 
-- **Behavior-named tests** describing user-visible outcomes; file-top comments record measured provenance (reference facts + dates).
-- **Computed-style parity gate**: `toHaveCSS` assertions on the six parity pins; treated as build-breakers. Screenshots are evidence, never gates.
-- **Fresh-context isolation**: every E2E test starts with empty localStorage; no cross-test state, no reset scripts needed.
-- **Strict-mode discipline**: `{ exact: true }` wherever copy collides ("Total"/"Subtotal", "Confirmed"/"confirmed", "Close menu"/"Close menu overlay").
-- **Regression-first**: the ready-gate hydration bug and the storage-versioning bug were both found by E2E and pinned by the fixes' specs.
+- **Unit = pure seams only** (money math, URL resolution, schemas, limiter, HMAC, delivery) — no DB, no DOM.
+- **E2E = the real artifact:** production standalone boots on :3100 against `db/e2e.db` (schema + seed via `global-setup.ts`); assertions target user-visible reality (roles, labels, `data-testid`, bounding boxes) — never implementation classes, except where a pin IS the contract (mobile nav tracking classes).
+- **Shared-DB discipline:** specs share one seeded DB and demo user → assertions use deltas, not absolute counts; specs tolerate guest mode (the COD spec fills the email field when rendered).
 
-### 7.3 Coverage Philosophy
+### 7.3 Pre-Deploy Checklist
 
-No numeric coverage gates. The standard: **every pure seam has a dedicated unit file, and every user flow has a dedicated E2E spec.** The parity spec is a build-breaker.
+```bash
+npm run verify      # typecheck → lint → 52 unit → production build (+ standalone assembly)
+npm run test:e2e    # 64 runs across chromium + mobile; requires the fresh build
+```
 
-### 7.4 Pre-Push Checklist
-
-1. `npm run typecheck` — exit 0
-2. `npm run test` — 104/104
-3. `npm run build` — succeeds (~507 KB single file)
-4. `npm run e2e` — 196/196 across chromium + mobile
-5. Docs updated in the same commit when contracts/visuals changed
-6. `AGENTS.md` trap log grown (not worked around) if a new trap was discovered
-7. Catalog edits: `tests/catalog-hash.test.ts` green — `STORAGE_KEY` bumped and `tests/catalog-registry.json` updated in the same change
-8. `src/data/catalog.ts` edits never reintroduce plaintext demo credentials — the seed ships `s1$…` digests (E2E `password-hash.spec.ts` fails the build otherwise)
-
----
+Both green = shippable. `npm run build` must re-run after ANY source change before E2E (the suite tests the built artifact, not dev).
 
 ## 8. Build & Deployment
 
 ### 8.1 Production Build
 
 ```bash
-npm run build      # → dist/index.html (single file, ~502 KB / ~127 KB gzip)
+npm run build
+# = next build (turbopack, output: "standalone")
+# + node scripts/assemble-standalone.mjs  (copies .next/static + public/ into .next/standalone/)
 ```
 
-`vite-plugin-singlefile` inlines all JS/CSS; `public/images/*` ships alongside as static assets. Serve `dist/` from any static host with SPA fallback (`vite preview` locally; Netlify/Vercel/gh-pages rewrites on a host). The full deployment procedure — static-host matrix, SEO origin sync, verification checklist, troubleshooting — lives in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Without the assemble step the standalone serves SSR HTML whose `/_next/static` chunks 404 — pages render but never hydrate (every click inert). This failure mode is exactly what the Playwright mobile project caught; the step is wired into the build script so it cannot be forgotten.
 
 ### 8.2 Environment Variables
 
-| Name | Required | Description | Default |
+| Variable | Required | Description | Default |
 |---|---|---|---|
-| `DATABASE_URL` | Yes | Schema-relative SQLite URL; resolves to repo-root `db/custom.db` via `src/lib/db-path.ts` (contract-tested) | `file:../db/custom.db` |
-| `E2E_PORT` | No | Playwright preview port | `4173` |
-| `E2E_BASE_URL` | No | Playwright base URL override | `http://127.0.0.1:4173` |
-| `VITE_SITE_URL` | No | Absolute origin for the SEO layer (canonical/og:url fallbacks in `index.html`, `src/lib/seo.ts`, sitemap generation). Override + re-run `node scripts/generate-sitemap.mjs` when deploying elsewhere | `http://localhost:4173` |
-| `CI` | No | Tightens Playwright (forbidOnly, 2 retries, no server reuse) | unset |
+| `DATABASE_URL` | yes | Schema-relative SQLite URL; absolute `file:` URLs pass through unchanged | `file:../db/custom.db` |
+| `AUTH_SECRET` | yes (prod) | Session-cookie HMAC secret | dev fallback constant |
+| `NEXT_PUBLIC_SITE_URL` | no | Canonical/og:url + sitemap origin | `http://localhost:3000` |
+| `E2E_PORT` | no | Playwright standalone port | `3100` |
 
-### 8.3 CI/CD
+### 8.3 Runtime
 
-No pipeline is configured in this repo. The pre-push gate is the documented `npm run verify && npm run e2e`; wiring it into CI is a one-line workflow if desired.
+```bash
+PORT=3000 NODE_ENV=production AUTH_SECRET=<32B secret> \
+  DATABASE_URL="file:<ABSOLUTE>/db/custom.db" \
+  node .next/standalone/server.js
+```
 
----
+Use an **absolute** `DATABASE_URL` in deployment: file tracing copies `prisma/schema.prisma` into the bundle, so a relative URL would re-anchor to `<bundle>/db/` (ADR-002). Health probe: `GET /api/health` → `{"ok":true,"db":true}`.
+
+### 8.4 Scaling Notes
+
+Single-node, single-writer SQLite, in-memory rate limiter. Horizontal scale would require: shared Postgres (Prisma provider swap), a shared rate-limit store (Redis), and object storage for media — the seams are isolated for exactly this swap (`db.ts`, `rate-limit.ts`, `images.unsplash.com` remote patterns), but no such deployment exists today.
 
 ## 9. Developer Handbook
 
 ### 9.1 Local Setup
 
 ```bash
-git clone https://github.com/nordeim/homenest-store-g.git
-cd homenest-store-g
-npm install          # Node ≥ 20
-npm run dev          # http://localhost:5173
+npm install
+npm run db:setup     # push schema + deterministic seed
+npm run dev          # http://localhost:3000 (turbopack)
 ```
 
-`.env` ships in the repo with the pinned `DATABASE_URL` (git-ignored in principle; keep the committed value and `.env.example` in sync).
+Verify: `{"ok":true,"db":true}` from `/api/health`; `/login` shows the measured card with demo credentials.
 
 ### 9.2 Common Commands
 
-| Command | Location | Purpose |
-|---|---|---|
-| `npm run dev` | repo root | Dev server :5173 |
-| `npm run build` | repo root | Single-file production build |
-| `npm run preview` | repo root | Serve dist/ :4173 (SPA fallback) |
-| `npm run typecheck` | repo root | Strict tsc gate |
-| `npm run test` / `test:watch` | repo root | Vitest units |
-| `npm run e2e` | repo root | Playwright (build first) |
-| `npx playwright test <spec>` | repo root | One spec |
-| `npx playwright show-trace <zip>` | repo root | Failure trace inspection |
+See the table in `AGENTS.md` (source of truth for commands). Frequency-ordered: `npm run dev` · `npm run verify` · `npm run test:e2e` · `npm run db:setup`.
 
 ### 9.3 Code Style Rules
 
-Enforced by `tsc` (strict, no unused locals/params, no fallthrough). Conventions: named exports, kebab-case page files with PascalCase exports, `cn()` for conditional classes, integer cents for money, absolute `/images/...` asset paths.
+- ESLint 9 flat config (`eslint.config.mjs`): typescript-eslint recommended + react-hooks (**`set-state-in-effect` = error**) + next/native warnings. Non-type-aware (tsc covers types).
+- TS strict; no `any`; DTOs and action envelopes typed end-to-end.
+- Formatting: prettier-compatible defaults as written; no formatter config file (keep diffs minimal).
 
 ### 9.4 Git Workflow
 
-Single `main` branch; Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`); atomic commits; docs updated with the change they describe; never commit `.env`, `db/*.db`, `node_modules/`, `dist/`, `test-results/`, `playwright-report/`.
-
----
+Single-branch (main) with atomic, descriptive commits; the pre-push gate is `npm run verify && npm run test:e2e`. CI parity: the E2E suite is self-hosting (boots its own server + DB), so a single CI step chain — install → build → verify → e2e — reproduces the full gate.
 
 ## 10. Known Issues & Outstanding Tasks
 
 | Priority | Issue | Impact | Status |
 |---|---|---|---|
-| ~~HIGH (accepted)~~ | ~~Demo passwords stored plaintext in localStorage~~ | — | **Hardened (session 5, R5-01):** salted WebCrypto digests at rest, upgrade-on-login, hashed demo seed. Server-backed auth (ADR-001) remains open for real deployments — SHA-256 is not a KDF and a client-only store cannot rate-limit or revoke |
-| ~~HIGH (accepted)~~ | ~~Guest tokens use `Math.random()` (~59 bits)~~ | — | **Fixed (session 3, R3-02):** `generateGuestToken()` = 128-bit `crypto.getRandomValues`, hex-encoded |
-| MEDIUM (accepted) | 3 high npm advisories in braces/micromatch via vite-plugin-singlefile | Build-time only; no runtime exposure | Accepted, documented in README troubleshooting |
-| ~~MEDIUM~~ | ~~No ESLint/Prettier config~~ | — | **Closed (session 16, R16-01):** ESLint 9 flat config (`eslint.config.js`) wired into `npm run verify` as the `lint` stage — js/ts recommended + react-hooks + react-refresh, non-type-aware (tsc stays the type floor); provider+hook co-location carved out only for `store.tsx`/`router.tsx`/`chrome.tsx`; `skills/` excluded. First full run: 0 findings |
-| ~~LOW~~ | ~~`isExpiryValid` hardcodes `year >= 26`~~ | — | **Fixed (session 3, R3-01):** rolling window with injectable clock; unit-pinned |
-| ~~LOW~~ | ~~Account header card overflows on phones with long identities~~ | — | **Fixed (session 5, R5-06):** wrapping header row + `min-w-0`/`break-words`; pinned by `tests/e2e/account-layout.spec.ts` |
-| LOW | WebKit not installed in this sandbox | Mobile project pins chromium engine; no Safari coverage locally | Accepted — host libs need root; browser binary cached, launch blocked (re-attempted session 3) |
-| LOW | Color-contrast pairs on parity surfaces (orange/amber/gray tokens) fail WCAG AA | axe `color-contrast` findings on parity-pinned tokens | Accepted — the reference itself fails these pairs; visual parity wins (remediation plan §9.2 R3-04); structural a11y is gated clean on 8 surfaces |
-| LOW | Carousel kicker field is stored but not rendered | Reference hero shows no kicker; kept for admin-editing future | Registered divergence |
-| ~~LOW~~ | ~~Desktop search combobox options are not announced with result counts~~ | — | **Closed (session 14, R14-01):** sr-only `role="status" aria-live="polite"` region inside the search form announces result counts / no-results politely on query change; pinned by `tests/e2e/search-keyboard.spec.ts` R14-01 specs and re-verified live each session |
-| LOW | Static SEO fallbacks hardcode the default origin (`http://localhost:4173`) | Deploying elsewhere needs `VITE_SITE_URL` + `node scripts/generate-sitemap.mjs`; the committed artifacts are test-gated against the catalog | Accepted — documented in `.env.example` (session 8) |
-| ~~MEDIUM~~ | ~~`package.json` ships no db scripts (standing mandate item)~~ | — | **Closed (session 26, R26-03):** `db:init` / `db:seed` / `db:setup` materialize the ADR-002 contract as a real SQLite `db/custom.db` via `scripts/db-setup.mjs` (node:sqlite, zero deps, idempotent, Prisma-free per ADR-001 — tooling parity only). Pinned by `tests/db-scripts.test.ts` (9 tests) |
-| LOW | Reference visual state is not frozen | The reference site drifts (menu trigger disc: green → bare → green → bare across sessions 3→5→26→27 — an oscillating surface; account avatar disc → plain icon by session 26) | Accepted — the follow-the-latest-measurement doctrine + computed-style E2E pins re-verify every session; remediation plan §22.1 records the session-27 drift remediation |
-
----
+| LOW | Google button on the auth card is visual-only (title explains it) | Parity stub, documented | Accepted (ADR-003) |
+| LOW | Rate limiter is in-memory (single-instance) | Multi-node deployments need a shared store | Documented (§8.4) |
+| LOW | Catalog images are Unsplash stock; 3 dead URLs were replaced with verified ones | Cosmetic | Closed 2026-10-14 |
+| LOW | `package.json` declares `next ^16.0.0` while 16.4.0 is installed (caret range) | Reproducibility | Open — pin exact versions when toolchain stabilizes |
+| INFO | Demo card settlement is instantaneous ("paid") | No real PSP | Accepted (ADR-007) |
 
 ## 11. Key Files Reference
 
-| File | Lines | Purpose |
+| File | ~Lines | Purpose |
 |---|---|---|
-| `src/components/chrome.tsx` | ~831 | Header + portaled mobile menu, APG search combobox (keyboard plan), modal cart drawer, toaster, chat FAB, footer, feature bar, form primitives |
-| `src/lib/store.tsx` | ~525 | Single store: state, persistence, all mutations (async hashed auth incl. upgrade-on-login) |
-| `src/pages/checkout-flow.tsx` | ~820 | Cart, checkout (COD + card), token-gated success |
-| `src/pages/account-pages.tsx` | ~863 | Auth card (async auth), account tabs, order detail, track order + stepper |
-| `src/data/catalog.ts` | ~700 | Seed catalog (24 products), categories, carousel, demo users (hashed credentials) |
-| `src/pages/shop.tsx` | ~380 | Products list (URL-driven filters), PDP, 404 |
-| `src/lib/commerce.ts` | ~235 | Money/shipping/promo/validation/tracking seams |
-| `src/lib/seo.ts` | ~170 | Pure route-head seam (`buildRouteMeta`): reference title map, canonical/og:url, Product JSON-LD (R8-05) |
-| `src/components/head-manager.tsx` | ~100 | Applies the route-head contract to document.title/meta/canonical/JSON-LD inside RouterProvider |
-| `scripts/generate-sitemap.mjs` | ~120 | Writes `public/robots.txt` + `public/sitemap.xml` from the catalog (`prebuild` hook; catalog-gated by `tests/sitemap.test.ts`) |
-| `src/lib/password.ts` | ~75 | Salted WebCrypto digest contract (`s1$…`), verify w/ legacy fallback |
-| `src/pages/admin-pages.tsx` | ~360 | Role-gated admin console (7 surfaces) |
-| `src/lib/router.tsx` | ~130 | History router + matchPath (27 routes) |
-| `src/index.css` | ~104 | `@theme` tokens (+ `--color-panel`) + base styles |
-| `src/lib/db-path.ts` | ~60 | DATABASE_URL resolution contract |
-| `tests/e2e/mobile-navigation.spec.ts` | ~223 | The parity-critical menu behaviors (incl. session-27 bare-icon trigger pins) |
-| `tests/e2e/cart-drawer.spec.ts` | ~70 | Cart drawer modal semantics (focus trap, restore) |
-| `tests/e2e/search-keyboard.spec.ts` | ~106 | APG combobox keyboard plan (arrows/Home/End/Enter/Escape) |
-| `tests/e2e/password-hash.spec.ts` | ~121 | Password-at-rest E2E: hashed seed, register, round-trip, legacy upgrade |
-| `tests/e2e/account-layout.spec.ts` | ~36 | Account header stays inside the viewport with long identities |
-| `tests/seo.test.ts` | ~190 | Route-head seam pins: reference title map, canonical/og:url split, Product JSON-LD shape |
-| `tests/sitemap.test.ts` | ~130 | Committed robots.txt/sitemap.xml ↔ catalog consistency gate |
-| `tests/e2e/seo-head.spec.ts` | ~185 | Served SEO artifacts + per-route titles + PDP canonical/og/JSON-LD |
-| `tests/e2e/visual-parity.spec.ts` | ~50 | Computed-style build-breakers |
-| `tests/db-path.test.ts` | ~75 | DB URL contract tests |
-
----
+| `src/app/globals.css` | ~200 | Tailwind v4 theme (hsl literals), @font-face, v4 trap pins |
+| `src/app/(storefront)/layout.tsx` | 49 | Chrome composition + StoreProvider server-truth init |
+| `src/components/store/store-provider.tsx` | 106 | Single client state seam (adjust-during-render) |
+| `src/components/store/header.tsx` | 142 | Sticky chrome, dropdowns, icon cluster, badges |
+| `src/components/store/mobile-nav.tsx` | 103 | Parity-critical drawer (flex gap-5 pin) |
+| `src/components/checkout/checkout-flow.tsx` | ~300 | 3-step wizard; card state; startTransition dispatch |
+| `src/lib/actions/checkout.ts` | 168 | Transactional order placement, stock guard, HMAC tokens |
+| `src/lib/cart.ts` / `cart-dto.ts` | 230/40 | Server cart domain / pure DTO contract |
+| `src/lib/db-path.ts` | 62 | Schema-relative URL resolution (pinned by tests) |
+| `src/lib/validation.ts` | ~120 | Zod schemas, redirect guard, Luhn |
+| `prisma/schema.prisma` | ~160 | 13 models |
+| `prisma/seed.ts` | 280 | Deterministic catalog/users/orders fixtures |
+| `playwright.config.ts` | ~95 | Standalone E2E harness, per-project auth |
+| `tests/e2e/mobile-navigation.spec.ts` | ~90 | The v4-trap geometry pins |
+| `scripts/assemble-standalone.mjs` | 40 | Postbuild static-asset assembly |
 
 ## 12. Glossary
 
 | Term | Meaning |
 |---|---|
-| **Reference** | `nest-culinary-hub.base44.app` — the site whose resting visuals and flows are cloned |
-| **Parity surface** | Any page/behavior expected to match the reference visually or functionally |
-| **Registered divergence** | A documented, intentional superset feature (PAD §5.6) that must not alter parity surfaces' resting visuals |
-| **Parity pin** | A computed-style value asserted by `tests/e2e/visual-parity.spec.ts` |
-| **Ready gate** | The `StoreProvider.ready` flag that auth guards observe before redirecting (hydration-race guard) |
-| **Schema-relative URL** | A `file:` URL resolved against a `prisma/` anchor, mirroring Prisma CLI semantics |
-| **COD** | Cash on Delivery — the default payment method; stored as `paymentLast4: "COD"` |
-| **Trap log** | Append-only list of Tailwind v4 / DOM traps in `AGENTS.md`; grow it, never work around it |
-| **Single-file build** | The `dist/index.html` artifact with JS/CSS inlined (`vite-plugin-singlefile`) |
+| **Parity surface** | A UI region whose resting visuals must match the measured reference (announcement bar, header, hero, card, mobile nav, drawer, overlay, footer, auth cards) |
+| **Superset** | Functionality the reference lacks but the clone implements (PLP/PDP/checkout/accounts/admin) |
+| **Action seam** | `src/lib/actions/*` — the only mutation path; Zod + authz + transactions |
+| **Envelope** | `ActionResult<T>` = `{ ok: true, data } \| { ok: false, error: { message, fieldErrors? } }` |
+| **Schema-relative URL** | `file:../db/custom.db` resolved against the nearest `prisma/schema.prisma` (CLI rule, reproduced at runtime) |
+| **v4 trap pin** | A Tailwind-CSS-v4 semantic difference (hsl literals, `space-y` rewrite) guarded by tests/comments |
+| **View token** | HMAC capability token letting a guest view one order confirmation |
+| **Adjust-during-render** | React pattern: re-sync state during render when props change identity (no effects) |

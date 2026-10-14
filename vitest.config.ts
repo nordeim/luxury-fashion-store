@@ -1,21 +1,19 @@
-import path from "path";
-import { fileURLToPath } from "url";
 import { defineConfig } from "vitest/config";
+import path from "node:path";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Unit layer: pure domain seams only (src co-located + tests/ contract tests).
-// Playwright specs (*.spec.ts) are deliberately excluded — no double pickup.
+// Unit-test layer for the pure domain seams: money math (integer cents,
+// shipping threshold), the schema-relative SQLite URL resolution contract,
+// Zod validation schemas, the login rate limiter, slugification, and the
+// delivery-window estimator. Browser/E2E coverage lives in tests/e2e/*.spec.ts
+// (Playwright — never picked up here, this config matches *.test.ts only).
 export default defineConfig({
   test: {
-    environment: "node",
     include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
-    testTimeout: 30_000,
+    environment: "node",
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": path.resolve(import.meta.dirname, "src"),
     },
   },
 });

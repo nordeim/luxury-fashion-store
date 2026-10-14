@@ -1,67 +1,54 @@
-/**
- * Database URL contract — mirrors the ecommerce-store reference convention.
- *
- * DATABASE_URL is SCHEMA-RELATIVE: `file:../db/custom.db` resolves the way the
- * Prisma CLI does, i.e. against a `prisma/` schema directory sitting at the repo
- * root. One URL therefore points at the same physical file (`<repoRoot>/db/custom.db`)
- * no matter which working directory a command runs from.
- *
- * The SPA itself is browser-only (state lives in localStorage); this module is
- * consumed by tooling (tests, docs, admin copy) and pinned by tests/db-path.test.ts.
- * Pinned by tests — do not simplify the resolution rules.
- */
+// Schema-relative SQLite URL resolution (the repo's db contract).
+//
+// `DATABASE_URL="file:../db/custom.db"` is intentionally relative: the Prisma
+// CLI resolves `file:` URLs against the directory containing
+// prisma/schema.prisma, so the database lands at <repoRoot>/db/custom.db no
+// matter where a command runs from. The Prisma **client** (used at runtime
+// here) resolves the same URL against the generated client's location —
+// which can differ. resolveDatabaseUrl() reproduces the CLI rule so the app
+// and its tooling agree on one physical file.
+//
+// DO NOT simplify: the resolution rules are pinned by tests/db-path.test.ts.
 
-export const DATABASE_URL = "file:../db/custom.db";
+import path from "node:path";
+import fs from "node:fs";
 
-/** Directory (relative to repo root) that file: URLs resolve against, like a Prisma schema. */
-export const SCHEMA_DIR = "prisma";
-
-export function isLocalFileUrl(url: string): boolean {
-  return url.trim().startsWith("file:");
-}
-
-/** Minimal POSIX path join (no node: imports so browser bundles stay clean). */
-function joinPath(base: string, relative: string): string {
-  const segments = `${base}/${relative}`.split("/");
-  const stack: string[] = [];
-  for (const segment of segments) {
-    if (!segment || segment === ".") continue;
-    if (segment === "..") {
-      stack.pop();
-      continue;
-    }
-    stack.push(segment);
+/** True when the process can be anchored at a directory containing prisma/schema.prisma. */
+export function findPrismaAnchor(startDir: string): string | null {
+  let dir = path.resolve(startDir);
+  // Bounded walk: repo roots are shallow; 8 levels is generous.
+  for (let i = 0; i < 8; i++) {
+    if (fs.existsSync(path.join(dir, "prisma", "schema.prisma"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
   }
-  return stack.join("/");
+  return null;
 }
 
 /**
- * Resolve a `file:` URL the way Prisma does: relative paths anchor to the schema
- * directory; absolute paths pass through. Returns the plain filesystem path.
+ * Resolve a `file:` SQLite URL against the prisma anchor (the CLI rule).
+ * Absolute file paths, `file:` URLs without relative segments, and non-file
+ * URLs pass through unchanged. Env overrides win over the repo default.
  */
-export function resolveDbPath(url: string = DATABASE_URL, schemaDir: string = SCHEMA_DIR): string {
-  const trimmed = url.trim();
-  const raw = isLocalFileUrl(trimmed) ? trimmed.slice("file:".length) : trimmed;
-  if (raw.startsWith("/")) {
-    return raw;
-  }
-  return joinPath(schemaDir, raw);
+export function resolveDatabaseUrl(
+  rawUrl: string | undefined,
+  cwd: string = process.cwd(),
+): string {
+  if (!rawUrl) return rawUrl as never; // unchanged (caller handles missing)
+  if (!rawUrl.startsWith("file:")) return rawUrl;
+
+  const filePath = rawUrl.slice("file:".length);
+  // Absolute path or bare filename: nothing relative to re-anchor.
+  if (path.isAbsolute(filePath) || !filePath.startsWith(".")) return rawUrl;
+
+  const anchor = findPrismaAnchor(cwd);
+  if (!anchor) return rawUrl; // no anchor discoverable — pass through
+  const abs = path.resolve(anchor, "prisma", filePath);
+  return `file:${abs}`;
 }
 
-/**
- * Path of the database file relative to the repo root. For the default URL this
- * is `db/custom.db` — the db/ folder at the root of the homenest-store-g repo.
- */
-export function dbPathFromRepoRoot(url: string = DATABASE_URL): string {
-  const resolved = resolveDbPath(url);
-  const schemaPrefix = `${SCHEMA_DIR}/`;
-  if (resolved.startsWith(schemaPrefix)) {
-    return resolved.slice(schemaPrefix.length);
-  }
-  return resolved;
-}
-
-/** Human-readable location line for the admin settings surface. */
-export function describeDbLocation(url: string = DATABASE_URL): string {
-  return `SQLite file at repo root: ${dbPathFromRepoRoot(url)} (${url})`;
+/** The repo's canonical runtime URL for <repoRoot>/db/custom.db. */
+export function defaultDatabaseUrl(cwd: string = process.cwd()): string {
+  return resolveDatabaseUrl("file:../db/custom.db", cwd);
 }

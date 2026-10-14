@@ -523,3 +523,28 @@ Stage Summary:
 - Parity posture: eleventh sweep caught the trigger's fourth flip (green→bare→green→bare); reverted to the bare dark icon per the follow-the-latest-measurement doctrine; all other pins hold; dialog contract + SEO/manifest supersets live-green
 - Oscillation documented as the signal: AGENTS.md + PAD §10 record the full four-measurement history so future sessions recognize the pattern in one read
 - Candidate list re-retired after remediation: validation track resumes as the standing default unless the reference drifts again; ADR-001 (server-backed auth) remains an owner decision
+
+---
+Task ID: 22
+Agent: main (Super Z)
+Task: Session 28 — Vite SPA → Next.js 16 transformation completed (AURELIA/VELOUR clone, functional superset of pastel-aurelia-fashion-edit.base44.app)
+
+Work Log:
+- Resumed the prematurely-stopped session: codebase (15 pages, components, actions, Prisma schema, seed) was written; DB push/seed had NOT run
+- DB: pushed schema + seeded db/custom.db (4 categories / 12 products / 2 users / 4 orders); handled sandbox DATABASE_URL override with env -u throughout
+- Fixed 15 typecheck errors (unused imports; Cart/Wishlist token minting on user-owned creates — token is the row identity; Address orderBy on nonexistent createdAt; ActionResult re-export; Zod cartAddSchema/cartDeltaSchema wired into actions)
+- Fixed 2 react-hooks/set-state-in-effect errors (QuickViewModal adjust-during-render; SearchOverlay derived visibleHits)
+- CRITICAL GAP: (storefront)/layout.tsx never written — chrome (header/nav/drawers/footer) never composed; wrote it with server-truth StoreProvider init
+- Split cart DTO contract into pure src/lib/cart-dto.ts (client imports failed the Turbopack build on next/headers trace)
+- Test suites written: 6 vitest files (52 tests) + 9 playwright spec files + global-setup + auth.setup (62 E2E + 2 setup)
+- Checkout bugs found via E2E + browser: (1) FormData.get null vs zod optional — every COD order rejected; (2) card fields read via getElementId AFTER step-1 unmount — card orders impossible → moved to controlled state; (3) formAction called outside startTransition; (4) revalidatePath raced the success redirect (removed; routes force-dynamic)
+- E2E infrastructure bugs: playwright global-setup CJS (import.meta) → cwd paths; standalone bundle missing .next/static (added scripts/assemble-standalone.mjs to build — SSR pages with 404 chunks = zero hydration); db-path re-anchor traced prisma/schema.prisma into the bundle → E2E uses absolute DATABASE_URL; per-project auth sessions (setup-chromium/setup-mobile) after logout spec poisoned the shared session; catalog: 3 dead Unsplash URLs replaced (verified 200)
+- Product fixes from testing: account Sign out button wired (logoutAction was orphaned); account Edit address button wired (editing state was never set)
+- Screenshots: clone-home-desktop, clone-shop-plp, clone-pdp, clone-cart, clone-mobile-home, clone-mobile-menu-open, clone-login → docs/screenshots/
+- Docs rewritten for the Next.js app per repo skills: AGENTS.md, CLAUDE.md, README.md, Project_Architecture_Document.md
+- Final gates: typecheck ✓ lint ✓ 52/52 unit ✓ build ✓ E2E 64/64 ✓ (1.0m)
+
+Stage Summary:
+- Verification ledger: typecheck ✓ lint ✓ 52/52 unit ✓ build ✓ 64/64 E2E ✓
+- The repo is now the Next.js 16 AURELIA clone: visual parity (VELOUR chrome, measured tokens, w-80 flex-gap mobile nav) + functional superset (PLP/PDP/cart/guest+member checkout/accounts/wishlist/admin/API)
+- Binding contracts encoded in AGENTS.md/CLAUDE.md/PAD: schema-relative DATABASE_URL (+ absolute pass-through for standalone), assemble-standalone postbuild, per-project playwright auth, flex gap-5 (never space-y), hsl() literals in @theme

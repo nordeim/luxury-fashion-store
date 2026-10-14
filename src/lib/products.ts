@@ -1,0 +1,61 @@
+import type { Prisma } from "@prisma/client";
+
+// Product DTO shape shared by server pages and client components.
+// Arrays arrive pre-parsed (the DB stores JSON strings).
+
+export interface ProductCardData {
+  id: string;
+  slug: string;
+  name: string;
+  brand: string;
+  description: string;
+  price: number;
+  compareAtPrice: number | null;
+  discount: number;
+  subcategory: string;
+  categorySlug: string;
+  sizes: string[];
+  colors: string[];
+  images: string[];
+  tag: string | null;
+  rating: number;
+  reviewCount: number;
+  isNew: boolean;
+  isBestseller: boolean;
+  stock: number;
+}
+
+type ProductWithCategory = Prisma.ProductGetPayload<{ include: { category: true } }>;
+
+/** Parse a DB product row (JSON string columns) into the DTO. */
+export function toProductCardData(p: ProductWithCategory): ProductCardData {
+  const parse = (json: string, fallback: string[] = []) => {
+    try {
+      const v = JSON.parse(json);
+      return Array.isArray(v) ? v.map(String) : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    id: p.id,
+    slug: p.slug,
+    name: p.name,
+    brand: p.brand,
+    description: p.description,
+    price: p.price,
+    compareAtPrice: p.compareAtPrice,
+    discount: p.discount,
+    subcategory: p.subcategory,
+    categorySlug: p.category.slug,
+    sizes: parse(p.sizes),
+    colors: parse(p.colors),
+    images: parse(p.images),
+    tag: p.tag,
+    rating: p.rating,
+    reviewCount: p.reviewCount,
+    isNew: p.isNew,
+    isBestseller: p.isBestseller,
+    stock: p.stock,
+  };
+}

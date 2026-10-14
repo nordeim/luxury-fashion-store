@@ -1,0 +1,84 @@
+"use client";
+
+// Home page composition — the 12 reference sections in order:
+// Hero → New Arrivals → The Edit → Our Bestsellers → Women's Collection →
+// Exclusive Deals → Sale Items → Men's Edit → Fine Accessories →
+// Styled by You. (Newsletter + Footer render from the group layout.)
+
+import { useState } from "react";
+import { HeroCarousel } from "@/components/store/hero-carousel";
+import { ProductRowSection } from "@/components/store/product-row";
+import { CategoryEdit } from "@/components/store/category-edit";
+import { ExclusiveDeals } from "@/components/store/exclusive-deals";
+import { StyledByYou } from "@/components/store/styled-by-you";
+import { QuickViewModal } from "@/components/store/quick-view-modal";
+import type { ProductCardData } from "@/lib/products";
+
+export function StorefrontHome({ products }: { products: ProductCardData[] }) {
+  const [quickView, setQuickView] = useState<ProductCardData | null>(null);
+
+  const by = (pred: (p: ProductCardData) => boolean) => products.filter(pred);
+  const newArrivals = by((p) => p.isNew);
+  const bestsellers = by((p) => p.isBestseller);
+  const women = by((p) => p.categorySlug === "women");
+  const saleItems = by((p) => p.compareAtPrice !== null);
+  const men = by((p) => p.categorySlug === "men");
+  const accessories = by((p) => p.categorySlug === "accessories");
+
+  return (
+    <>
+      <HeroCarousel />
+      <ProductRowSection
+        kicker="JUST LANDED"
+        title="New Arrivals"
+        products={newArrivals}
+        viewAllHref="/shop?sort=newest"
+        onQuickView={setQuickView}
+      />
+      <CategoryEdit />
+      <ProductRowSection
+        kicker="CLIENT FAVOURITES"
+        title="Our"
+        titleAccent="Bestsellers"
+        products={bestsellers}
+        viewAllHref="/shop?sort=rating"
+        onQuickView={setQuickView}
+      />
+      <ProductRowSection
+        kicker="WOMEN"
+        title="Women's"
+        titleAccent="Collection"
+        products={women}
+        viewAllHref="/shop?category=women"
+        onQuickView={setQuickView}
+      />
+      <ExclusiveDeals />
+      <ProductRowSection
+        kicker="UP TO 40% OFF"
+        title="Sale"
+        titleAccent="Items"
+        products={saleItems}
+        viewAllHref="/shop?sale=1"
+        onQuickView={setQuickView}
+      />
+      <ProductRowSection
+        kicker="MEN"
+        title="Men's"
+        titleAccent="Edit"
+        products={men}
+        viewAllHref="/shop?category=men"
+        onQuickView={setQuickView}
+      />
+      <ProductRowSection
+        kicker="FINISHING TOUCHES"
+        title="Fine"
+        titleAccent="Accessories"
+        products={accessories}
+        viewAllHref="/shop?category=accessories"
+        onQuickView={setQuickView}
+      />
+      <StyledByYou />
+      <QuickViewModal product={quickView} onClose={() => setQuickView(null)} />
+    </>
+  );
+}

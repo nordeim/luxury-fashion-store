@@ -1,105 +1,88 @@
-# CLAUDE.md — HomeNest Kitchen
+# CLAUDE.md — AURELIA (VELOUR)
 
-This file is read fresh for every conversation. Be brief and practical. The exhaustive rulebook (trap log, parity pins, testing quirks) lives in `AGENTS.md`; the full engineering reference is `Project_Architecture_Document.md`; the distilled 20-section engineering skill (patterns, debugging, lessons) is `homenest-store-g_SKILL.md`; the audit ledger is `docs/remediation-plan.md`.
+Guidance for Claude Code working in this repository. Read alongside `AGENTS.md` (commands/env quick reference) and `Project_Architecture_Document.md` (deep architecture + ADRs).
 
-## 1. Core Identity
+## Project Identity
 
-HomeNest Kitchen is a production-grade e-commerce storefront + admin console — a visual and functional clone of `nest-culinary-hub.base44.app` (reference measured live 2026-10-12) implemented as a **client-only SPA**: Vite 7, React 19, TypeScript strict, Tailwind CSS v4 (CSS-first `@theme`), shipped as a single HTML file via `vite-plugin-singlefile`. There is no server: commerce state (cart, wishlist, orders, sessions) persists in browser `localStorage` (`homenest.v4`), with `DATABASE_URL="file:../db/custom.db"` pinned for the repo-root `db/` tooling contract.
+A production-grade luxury fashion e-commerce storefront and admin console — a **functional superset** of the reference prototype (`pastel-aurelia-fashion-edit.base44.app`, a visual-only React prototype with inert commerce buttons) with **resting-state visual parity**. Built on the `ecommerce-store` architecture model: Next.js 16 App Router, React 19, TypeScript strict, Tailwind CSS v4 (CSS-first), Prisma 6/SQLite, Zod-validated server actions, custom scrypt+session auth.
 
-The SEO layer (session 8) is a generated + seam-driven superset: `src/lib/seo.ts` owns the per-route head contract (the reference's inline title map incl. its quirks, plus dynamic PDP/auth/not-found titles, canonical, og:url, Product JSON-LD), `src/components/head-manager.tsx` applies it, and `scripts/generate-sitemap.mjs` writes `public/robots.txt` + `public/sitemap.xml` (catalog-gated by `tests/sitemap.test.ts`) via the `prebuild` hook. Never hand-edit the artifacts or set `document.title` outside the seam (AGENTS.md rules 10–11).
+**Parity law:** on every parity surface (announcement bar, header, hero, product card, mobile nav, cart drawer, search overlay, footer, login/register cards), the *resting* visual output must match the reference's measured geometry and typography. Functional additions (working PLP/PDP/checkout/admin) may extend, never restyle, those surfaces.
 
-## 2. Foundational Principles — The Meticulous Six-Phase Workflow
+## Tech Stack (pinned)
 
-1. **ANALYZE** — Read the relevant files completely before proposing anything. Check `AGENTS.md` (trap log) and this file first.
-2. **PLAN** — Break work into vertical slices: one seam, one test, one implementation. State assumptions explicitly.
-3. **VALIDATE** — Confirm the slice is testable: which spec pins it? If none exists, write it first (red → green).
-4. **IMPLEMENT** — Smallest change that satisfies the slice without weakening guards.
-5. **VERIFY** — Run the full gate: `npm run verify && npm run e2e`. All five stages (typecheck, lint, unit, build, E2E) must exit 0.
-6. **DELIVER** — Conventional Commit; update `AGENTS.md`/`README.md`/`Project_Architecture_Document.md` in the same commit when behavior, contracts, or visuals changed.
+| Layer | Technology | Version |
+|---|---|---|
+| Framework | Next.js (App Router, Turbopack) | 16.4.0 |
+| UI runtime | React | 19.3.0 |
+| Language | TypeScript (strict) | 5.9.3 |
+| Styling | Tailwind CSS (CSS-first `@theme`) | 4.3.3 |
+| ORM / DB | Prisma + SQLite (single file) | 6.19.3 |
+| Validation | Zod | 3.25.76 |
+| Unit tests | Vitest (node env) | 3.2.7 |
+| E2E | Playwright (standalone server) | 1.64.0 |
+| Icons | lucide-react | 0.545.0 |
 
-Non-negotiables:
-- Never weaken a trap-log pin to make something pass.
-- Never delete or skip a test to ship; fix the underlying issue or flag the debt explicitly.
-- Never claim "works" without having run the gate and observed the result.
+## Six-Phase Workflow
 
-## 3. Implementation Standards
+1. **Reproduce/read first** — for bugs, reproduce in the browser or a test before touching code. For features, read the nearest parity surface and the action seam you'll extend.
+2. **Plan the seam** — decide which layer changes: page (RSC) → component → action (mutation) → validation → schema. Mutations ALWAYS go through `src/lib/actions/`.
+3. **Implement minimal + typed** — strict TS; no `any`; DTOs flow server→client as props.
+4. **Gate locally** — `npm run verify` (typecheck → lint → 52 unit tests → build), then `npm run test:e2e` (62 E2E + 2 setup, both device projects). All must pass before commit.
+5. **Verify in the browser** — dev server + `agent-browser` for visual/behavioral checks; screenshots for parity surfaces live in `docs/screenshots/`.
+6. **Document drift** — if you changed a pinned contract (env, db path, parity pins, test strategy), update `AGENTS.md` + the PAD in the same commit.
 
-### TypeScript
-- Strict mode; `noUnusedLocals`/`noUnusedParameters` are compile errors — prune imports.
-- No `any` (use `unknown` at boundaries), no `ts-ignore`, no commented-out code.
-- Named exports for components and helpers; `interface` for object shapes, `type` for unions.
+## Non-Negotiable Implementation Standards
 
-### React 19
-- Function components only. State lives in `StoreProvider` (one context) — do not add parallel contexts or external state libs without an ADR.
-- Effects: keep them for true I/O (storage persistence, timers, listeners). Derive during render (`useMemo`) instead of syncing state in effects.
-- Overlay/menu primitives that need `position: fixed` while the header is `backdrop-blur`-ed MUST be portaled to `document.body` (see AGENTS.md trap #5).
+### Mutations (server actions)
+- `"use server"` modules may only export async functions; shared types live in plain modules beside them (e.g. `src/lib/actions/checkout-types.ts`).
+- Every action: Zod-parse input → authz check (`getCurrentUser` / `isAdmin`) → transactional DB write → return `ActionResult<T>` (`src/lib/action-result.ts` envelope: `{ ok, data | error: { message, fieldErrors? } }`).
+- Rate-limit unauthenticated write seams (`src/lib/rate-limit.ts`) — login/register/newsletter/checkout all do.
+- Cart/wishlist rows are keyed by a 192-bit random `token` (unique) — user-owned rows mint tokens on create too; guest→user merge happens at login (`mergeGuestCartIntoUser`).
+- Guest order confirmations ride an HMAC view token (`src/lib/order-token.ts`) — sequential order numbers are not capability tokens.
 
-### Tailwind CSS v4
-- CSS-first: `@theme` in `src/index.css` is the only token source. No `tailwind.config.js`, ever.
-- Colors are full `hsl(...)` literals. Parity-critical computed values are pinned in `tests/e2e/visual-parity.spec.ts` — re-measure after token changes.
-- Gradients that need sRGB parity use explicit `linear-gradient(...)` inline styles.
+### React 19 / Next.js 16 client code
+- **No `setState` inside effects** — `react-hooks/set-state-in-effect` is an error here. Use adjust-state-during-render (last-seen-props pattern, see `StoreProvider`) or derived state (see `SearchOverlay.visibleHits`).
+- Async action fns from `useActionState` must dispatch inside `startTransition` when called programmatically (see `CheckoutFlow.submit`).
+- `FormData.get()` returns `null` for absent keys → coerce `?? undefined` before Zod `optional()` (absent card fields broke every COD order once).
+- Values needed across wizard steps must live in React state, not the DOM (step-2 review unmounts step-1 inputs).
 
-### Data contracts
-- Money = integer cents; format only at render (`formatMoney`).
-- Validate inputs at the boundary with the helpers in `lib/commerce.ts` (`isEmail`, `isZip`, `isCardNumberValid`, `isExpiryValid` — rolling window with injectable clock, `validateRedirectPath`). Same-origin redirects only.
-- Guest order views are capability-gated: `?order=<number>&token=<guestToken>`; tokens are 128-bit `crypto.getRandomValues` hex (`generateGuestToken`); owners see their orders via `userId`.
+### Tailwind v4 (CSS-first)
+- All theme tokens are full `hsl(...)` literals in `@theme inline` (`src/app/globals.css`) — bare HSL triplets render transparent in v4.
+- Vertical stacks use `flex flex-col gap-*`; **never `space-y-*`** for parity surfaces (v4 selector rewrite changes geometry). Pinned by E2E bounding-box assertions.
+- Self-hosted fonts via `@font-face` in `globals.css` from `public/fonts/` — no Google Fonts network dependency.
 
-## 4. Development Workflow
+### Database
+- Schema-relative URL contract: `DATABASE_URL="file:../db/custom.db"` → `<repoRoot>/db/custom.db`. Resolution rule in `src/lib/db-path.ts` (pinned by unit tests; do not simplify).
+- Money columns are integer cents. SQLite has no enums — statuses are strings Zod-validated at every seam.
+- Seed (`prisma/seed.ts`) is deterministic (fixed scrypt salts) and idempotent (upserts): 4 categories, 12 products (catalog = array order = `sortOrder`), 2 users, 4 canonical orders.
 
-### Environment
+### Testing strategy
+- **Vitest** (`src/lib/*.test.ts`, node env): pure seams only — money, db-path resolution, validation schemas, rate limiter, delivery windows, HMAC tokens.
+- **Playwright** (`tests/e2e/*.spec.ts`): boots the production standalone on :3100 against `db/e2e.db` via `global-setup.ts`; `npm run build` must run first. Web server env uses an **absolute** `DATABASE_URL` (file tracing copies `prisma/schema.prisma` into the standalone bundle, which would re-anchor a relative URL to a nonexistent path).
+- Auth: `setup-chromium` / `setup-mobile` projects each log in once → `tests/e2e/.auth/{chromium,mobile}.json`. Per-test logins would trip the 10/15min limiter.
+- Shared seeded DB across specs → assert deltas, not absolute counts; specs that log out must run before nothing that depends on the session (per-project files keep projects isolated; within a project, later specs must tolerate guest mode — see the COD checkout spec).
+- `scripts/assemble-standalone.mjs` runs as part of `npm run build` — without it the standalone serves SSR HTML with 404 chunks (zero hydration). Never remove it.
+
+## Environment Variables
+
+| Var | Required | Purpose |
+|---|---|---|
+| `DATABASE_URL` | yes | Schema-relative SQLite URL (`file:../db/custom.db`) |
+| `AUTH_SECRET` | yes (prod) | Session-cookie HMAC secret |
+| `NEXT_PUBLIC_SITE_URL` | optional | Canonical/og:url + sitemap origin (default `http://localhost:3000`) |
+
+## Commands
+
+See the command table in `AGENTS.md`. The pre-commit gate is exactly:
+
 ```bash
-npm install
-cp .env.example .env   # already committed as .env in this repo; keep values in sync
-npm run dev            # http://localhost:5173
+npm run verify        # typecheck → lint → unit → build
+npm run test:e2e      # 62 E2E + 2 setup across chromium + mobile
 ```
 
-### Commands
-| Task | Command |
-|---|---|
-| Dev | `npm run dev` |
-| Build (single file) | `npm run build` |
-| Typecheck | `npm run typecheck` |
-| Unit tests | `npm run test` / `npm run test:watch` |
-| Lint (flat config, R16-01) | `npm run lint` |
-| E2E (needs build) | `npm run build && npm run e2e` |
-| Everything (pre-push) | `npm run verify && npm run e2e` |
+## Escalation Rules
 
-### Demo accounts
-| Role | Email | Password |
-|---|---|---|
-| Customer | `john@example.com` | `Demo1234!` |
-| Admin | `admin@homenest.kitchen` | `Admin1234!` |
-
-Passwords are hashed at rest (session 5, R5-01): `User.passwordHash` = `s1$<salt>$<sha256(salt:password)>` via WebCrypto with a CSPRNG salt (`src/lib/password.ts`); `login`/`register`/`changePassword` are async and legacy plaintext records upgrade in place on the next successful login. The demo seed ships pre-hashed. This is defense-in-depth, not a KDF — never copy the pattern into a server-backed deployment; see PAD §6.2/§6.3.
-
-## 5. Testing Strategy
-
-- **Unit (Vitest, node env)**: pure seams only — commerce math, db-path contract, catalog↔storage-key registry, password-at-rest contract, route-head seam (`buildRouteMeta`), committed robots/sitemap ↔ catalog consistency, db-scripts contract. Co-located `*.test.ts` next to the seam, plus `tests/*.test.ts` for repo contracts. 104 tests.
-- **E2E (Playwright, production build)**: user-visible behavior through real UI interactions — smoke, mobile navigation (incl. modal focus trap + bare-icon trigger pins), mobile header parity, cart-drawer modal semantics, catalog, cart/checkout, auth/admin, search-combobox keyboard plan, account-header layout, password-at-rest, a11y smoke (axe structural gate on eight surfaces incl. checkout/contact and authenticated account/admin), visual parity, SEO head gate (served robots/sitemap, per-route titles, PDP canonical/og/JSON-LD), PWA manifest. 98 specs = 196 runs across chromium + mobile (iPhone 14 profile on chromium engine), `workers: 1`.
-- **Visual parity gate**: `tests/e2e/visual-parity.spec.ts` asserts computed colors/fonts from the reference measurement. Treat it as a build-breaker.
-- Bugs get a failing regression test at the same seam before the fix.
-
-## 6. Code Quality
-
-- The gate is green before every push: `npm run verify && npm run e2e`.
-- No `console.log` in committed code; `console.error("[tag]", err)` for caught failures.
-- Commit style: Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`), atomic units, why in the body when non-obvious.
-- Docs updated in the same commit as the change they describe.
-
-## 7. Error Handling & Debug
-
-Debug order: reproduce in the browser → read the console → `npm run typecheck` → single unit test → single E2E spec with `npx playwright test <spec> --headed`. For flaky E2E: `trace: "retain-on-failure"` artifacts in `test-results/` (`npx playwright show-trace <zip>`).
-
-Known traps to check first: hydration race (gate on `ready`), stale localStorage (bump `STORAGE_KEY`), strict-mode locator collisions (use `exact: true`), disabled-button clicks, backdrop-filter containing block.
-
-## 8. Communication & Docs
-
-- Explain why, not just what. Tag claims as Verified / Reasoned / Assumed when it matters.
-- ADRs live in `Project_Architecture_Document.md` §1.3. New consequential decisions get a new ADR number — append, never renumber.
-- Registered divergences from the reference site are listed in PAD §5.6. Superset features must not change the resting visuals of parity surfaces.
-
-## 9. Project-Specific Standards
-
-- **Route structure is a parity surface**: `/product/:id` mirrors the reference; `/products/:slug` remains supported for deep links.
-- **Catalog**: the 8 reference products (names, cents prices, ratings, review counts) are pinned exactly; the extra 16 products are the registered superset.
-- **Success metrics**: the gate is green; new features ship with tests at the same seam; the trap log grows instead of being worked around; a fresh clone reaches `npm run dev` in under two minutes with zero manual steps.
+- Never weaken a parity pin, the Zod seam, or the money invariant to make a test pass — fix the product.
+- Never add a client-side data fetch where an RSC prop or server action exists.
+- Never introduce a second client-state mechanism besides `StoreProvider`.
+- Schema changes require: `npm run db:push` + seed re-run + updated PAD data-model section in the same commit.

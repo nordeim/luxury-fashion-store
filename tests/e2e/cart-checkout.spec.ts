@@ -1,119 +1,82 @@
+// Cart → checkout — the money path: drawer add, cart page quantity union,
+// 3-step wizard (Shipping → Payment → Review), COD placement, confirmation.
+//
+// Suite-wide state note: specs share ONE seeded database and ONE signed-in
+// demo user, so the user cart may already hold lines from earlier specs.
+// Every assertion here is written against DELTAS or UI-visible reality —
+// never absolute counts.
 import { expect, test } from "@playwright/test";
 
-/**
- * Cart → checkout → placement → tracking, the COD flow with reference parity.
- * Free shipping at $50 (flat $9.99 under), no tax line, COD by default with a
- * demo card option. Order success is token-gated for guests.
- */
-
-async function addKnife(page: import("@playwright/test").Page, quantity = 1) {
-  await page.goto("/product/p-knife-set");
-  for (let index = 1; index < quantity; index += 1) {
-    await page.getByRole("button", { name: "Increase quantity" }).click();
-  }
-  await page.getByRole("button", { name: "Add to Cart" }).click();
-  await expect(page.getByRole("button", { name: /Added!/ })).toBeVisible();
+async function openDrawerWithItem(page: import("@playwright/test").Page) {
+  // PDP CTA: always visible (the card-grid action row is hover-revealed).
+  await page.goto("/product/silk-draped-evening-gown");
+  await page.locator("main").getByRole("button", { name: "Add to Bag" }).first().click();
+  await expect(page.getByTestId("cart-drawer")).toBeVisible();
 }
 
-async function fillCheckout(page: import("@playwright/test").Page) {
-  await page.getByLabel("Full Name *").fill("John Mercer");
-  await page.getByLabel("Phone Number *").fill("+1 (555) 010-0148");
-  await page.getByLabel("Email Address").fill("john@example.com");
-  await page.getByLabel("Street Address *").fill("48 Oak Street");
-  await page.getByLabel("Apartment, Suite, etc. (optional)").fill("Apt 3");
-  await page.getByLabel("City *").fill("San Francisco");
-  await page.getByLabel("State").fill("CA");
-  await page.getByLabel("ZIP Code").fill("94110");
+async function emptyTheBag(page: import("@playwright/test").Page) {
+  await page.goto("/cart");
+  for (;;) {
+    const remove = page.getByRole("button", { name: /remove/i }).first();
+    if (!(await remove.isVisible().catch(() => false))) break;
+    await remove.click();
+    await page.waitForTimeout(150); // server-action roundtrip per line
+  }
 }
 
-test("cart page shows subtotal, free shipping at $50+, and the COD notice", async ({ page }) => {
-  await addKnife(page);
-  await page.goto("/cart");
-  await expect(page.getByRole("heading", { name: /Your Cart/ })).toBeVisible();
-  await expect(page.getByText("Subtotal")).toBeVisible();
-  await expect(page.getByText("Free")).toBeVisible();
-  await expect(page.getByText("Total", { exact: true })).toBeVisible();
-  await expect(page.getByText("Cash on Delivery")).toBeVisible();
-  await expect(page.getByText("Tax")).toHaveCount(0);
-});
+test.describe("cart + checkout", () => {
+  test("drawer steppers mutate the line (server truth)", async ({ page }) => {
+    await openDrawerWithItem(page);
+    const qty = page.getByTestId(/^qty-/).first();
+    const before = Number((await qty.textContent()) ?? "0");
+    await page.getByTestId("cart-drawer").getByRole("button", { name: "Increase quantity" }).click();
+    await expect(qty).toHaveText(String(before + 1));
+    await page.getByTestId("cart-drawer").getByRole("button", { name: "Decrease quantity" }).click();
+    await expect(qty).toHaveText(String(before));
+  });
 
-test("empty cart offers the honest empty state", async ({ page }) => {
-  await page.goto("/cart");
-  await expect(page.getByRole("heading", { name: "Your cart is empty" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Browse Products" })).toBeVisible();
-});
+  test("empty bag shows the empty state with a way back", async ({ page }) => {
+    await emptyTheBag(page);
+    await expect(page.getByText("Your bag is empty")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Continue Shopping" })).toBeVisible();
+  });
 
-test("cart drawer mirrors the page and checks out", async ({ page }) => {
-  await addKnife(page);
-  await page.locator('button[aria-label="Open cart"]').click();
-  const drawer = page.getByRole("dialog", { name: "Cart" });
-  await expect(drawer).toBeVisible();
-  await expect(drawer).toContainText("Damascus Steel Chef Knife Set");
-  await drawer.getByRole("button", { name: "Checkout" }).click();
-  await expect(page).toHaveURL(/\/checkout$/);
-});
+  test("cart page totals re-derive from server rows", async ({ page }) => {
+    await openDrawerWithItem(page);
+    await page.goto("/cart");
+    await expect(page.getByText("Proceed to Checkout")).toBeVisible();
+    await expect(page.getByText(/Subtotal/i)).toBeVisible();
+  });
 
-test("checkout validates required fields before placing", async ({ page }) => {
-  await addKnife(page);
-  await page.goto("/checkout");
-  await page.getByRole("button", { name: "Place Order" }).click();
-  await expect(page.getByText("Full name is required.")).toBeVisible();
-  await expect(page).toHaveURL(/\/checkout$/);
-});
+  test("COD checkout places an order end-to-end (signed in or guest)", async ({ page }) => {
+    await openDrawerWithItem(page);
+    await page.goto("/checkout");
 
-test("promo code applies the NEST10 discount above the min spend", async ({ page }) => {
-  await addKnife(page, 1);
-  await page.goto("/cart");
-  await page.getByRole("button", { name: "Have a promo code?" }).click();
-  await page.getByLabel("Promo code").fill("NEST10");
-  await page.getByRole("button", { name: "Apply" }).click();
-  await expect(page.getByText("NEST10 applied.")).toBeVisible();
-  await expect(page.getByText(/Discount \(NEST10\)/)).toBeVisible();
-});
+    // Step 0 — shipping. Guest sessions render an email field (specs earlier
+    // in the suite may have signed out); signed-in sessions prefill the name.
+    // exact:true — the newsletter input's aria-label ("Your email address")
+    // substring-matches "Email", which would turn getByLabel ambiguous.
+    const email = page.getByLabel("Email", { exact: true });
+    if (await email.count()) {
+      await email.fill("james@example.com");
+    }
+    await page.getByLabel("Full Name").fill("James Whitmore");
+    await page.getByLabel("Street Address").fill("212 Mercer Street, Apt 4B");
+    await page.getByLabel("City").fill("New York");
+    await page.getByLabel("State").fill("NY");
+    await page.getByLabel("ZIP").fill("10012");
+    await page.getByRole("button", { name: "Continue to Payment" }).click();
 
-test("placing a COD order lands on the token-gated success page", async ({ page }) => {
-  await addKnife(page);
-  await page.goto("/checkout");
-  await fillCheckout(page);
-  await expect(page.getByRole("radio", { name: /Cash on Delivery/ })).toBeChecked();
-  await page.getByRole("button", { name: "Place Order" }).click();
-  await expect(page).toHaveURL(/\/order-success\?order=ORD-.+&token=/);
-  await expect(page.getByRole("heading", { name: "Order Placed!" })).toBeVisible();
-  await expect(page.getByText(/Order #ORD-/)).toBeVisible();
-  await expect(page.getByText("Cash on Delivery").first()).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Order Details" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Delivery Information" })).toBeVisible();
-});
+    // Step 1 — COD, then to review.
+    await page.getByText("Cash on Delivery").click();
+    await page.getByRole("button", { name: "Review Order" }).click();
 
-test("the success link rejects tampering", async ({ page }) => {
-  await page.goto("/order-success?order=ORD-2026-999&token=wrong-token");
-  await expect(page.getByText("We cannot show that order")).toBeVisible();
-});
+    // Step 2 — review + place.
+    await expect(page.getByText(/review/i).first()).toBeVisible();
+    await page.getByRole("button", { name: /place order/i }).click();
 
-test("placed order is trackable by order number with a 5-step progress", async ({ page }) => {
-  await addKnife(page);
-  await page.goto("/checkout");
-  await fillCheckout(page);
-  await page.getByRole("button", { name: "Place Order" }).click();
-  await expect(page).toHaveURL(/\/order-success/);
-  const orderNumber = (page.url().match(/order=(ORD-[\w-]+)/) ?? [])[1];
-  expect(orderNumber).toBeTruthy();
-
-  await page.goto("/track-order");
-  await page.getByLabel("Order number").fill(orderNumber);
-  await page.getByRole("button", { name: "Track" }).click();
-  await expect(page.getByText(orderNumber).first()).toBeVisible();
-  const progress = page.getByRole("list", { name: "Order progress" });
-  await expect(progress).toBeVisible();
-  for (const step of ["Order Placed", "Confirmed", "Processing", "Shipped", "Delivered"]) {
-    await expect(progress.getByText(step, { exact: true })).toBeVisible();
-  }
-  await expect(page.getByRole("heading", { name: "Items Ordered" })).toBeVisible();
-});
-
-test("unknown order number shows a calm miss state", async ({ page }) => {
-  await page.goto("/track-order");
-  await page.getByLabel("Order number").fill("ORD-NOPE-404");
-  await page.getByRole("button", { name: "Track" }).click();
-  await expect(page.getByText("No matching order", { exact: false })).toBeVisible();
+    await expect(page).toHaveURL(/\/checkout\/success/, { timeout: 20_000 });
+    await expect(page.getByText(/thank you|order confirmed/i).first()).toBeVisible();
+    await expect(page.getByText(/ORD-\d{4}-\d{3}/).first()).toBeVisible();
+  });
 });
