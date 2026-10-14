@@ -1,10 +1,10 @@
 Please carefully read completely and internalized your operating instructions in the attached/pasted text.
-Now, please meticulously plan to create a complete, fully functioning, production-ready and enterprise-grade polished website that is a clone of `https://pastel-aurelia-fashion-edit.base44.app/` (latter needs to login `https://pastel-aurelia-fashion-edit.base44.app/login` using ID `sepnetflix2023@outlook.com` and password `$Abcd1234`). 
+Now, please meticulously plan to create a complete, fully functioning, production-ready and enterprise-grade polished website that is a clone of `https://pastel-aurelia-fashion-edit.base44.app/` (latter needs to login `https://pastel-aurelia-fashion-edit.base44.app/login` using ID `sepnetflix2023@outlook.com` and password `$Abcd1234`).
 Use the codebase from GitHub repo `https://github.com/nordeim/ecommerce-store.git` (review `AGENTS.md`, `CLAUDE.md`, `Project_Architecture_Document.md` and `ecommerce-store_SKILL.md` from repo `https://github.com/nordeim/ecommerce-store.git` for the tech stacks and model architecture) as the foundation to build your awesome clone of `https://pastel-aurelia-fashion-edit.base44.app/`. There are also skills in the `skills/` folder in the `https://github.com/nordeim/ecommerce-store.git` repo that may be relevant and helpful (refer to `https://github.com/nordeim/ecommerce-store/blob/main/skills/skills-catalog.md` to find relevant skills for help in building an awesome clone of `https://pastel-aurelia-fashion-edit.base44.app/`)
 
 Consider using the included skills `skills/clone-app-pat-pro`, `skills/agent-browser`, `skills/rootless-postgresql`, `skills/e-commerce-nextjs16-monorepo`, `skills/nextjs-postgresql-single-app`, and `skills/tdd`.
 
-Do not run your default `init-fullstack.sh` to initialize the new codebase, `git clone https://github.com/nordeim/luxury-fashion-store.git` and use the cloned `luxury-fashion-store/` folder as the root of your new folder. The repo folder contains minimal documentation and config files for scaffolding purposes and for you to customize and extend as necessary. List and read the repo included `.md` markdown files, particularly `docs/Tailwind-V4-Validation-Report.md` before you begin planning to build the complete codebase for a complete, fully functioning, production-ready and enterprise-grade polished website that is a clone of `https://pastel-aurelia-fashion-edit.base44.app/`
+Do not run your default `init-fullstack.sh` or other method to initialize the new codebase, `git clone https://github.com/nordeim/luxury-fashion-store.git` and use the cloned `luxury-fashion-store/` folder as the root of your new folder. The repo folder contains the documentation and config files for scaffolding purposes and for you to customize, adapt and extend as appropriate. List and read the repo included `.md` markdown files, particularly `docs/Tailwind-V4-Validation-Report.md` before you begin planning to build the complete codebase for a complete, fully functioning, production-ready and enterprise-grade polished website that is a clone of `https://pastel-aurelia-fashion-edit.base44.app/`
 
 Meticulously plan to use 'agent-brower' tool and other available browsing tools and scripts to check for any visual and functionality gaps. Goal is to ensure that the clone website (the repo codebase) is a production ready 'superset' of the original reference site in terms of functionality while maintaining visual parity with the original reference website. Proceed with your best recommendations on decisions regarding any open questions during planning.
 
@@ -23,7 +23,7 @@ Next, please meticulously plan to create `AGENTS.md`, `CLAUDE.md`, `README.md` a
 - `https://github.com/nordeim/luxury-fashion-store/blob/main/skills/readme-md/SKILL.md`
 - `https://github.com/nordeim/luxury-fashion-store/blob/main/skills/project-architecture-document-md/SKILL.md`
 
-Capture some screenshots for the dev server running the remediated codebase, save the screen captures as image files under the `docs/screenshots/` folder in the new `luxury-fashion-store` repo. 
+Capture some screenshots for the dev server running the remediated codebase, save the screen captures as image files under the `docs/screenshots/` folder in the new `luxury-fashion-store` repo.
 
 All documents to be in markdown format and to be created in the root folder of the new codebase.
 Finally, `git commit` locally and then `git push` to `git@github.com:nordeim/luxury-fashion-store.git` using the ssh key:
@@ -32,4 +32,3 @@ SSH key for `git push`:
 ```
 
 ```
-
