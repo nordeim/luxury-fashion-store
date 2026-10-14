@@ -4,8 +4,8 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { getCurrentUser, hashPassword, verifyPassword } from "@/lib/auth";
-import { addressSchema } from "@/lib/validation";
+import { getCurrentUser, hashPassword, verifyPassword, currentSessionToken } from "@/lib/auth";
+import { addressSchema, passwordSchema } from "@/lib/validation";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 
 export async function updateProfileAction(
@@ -40,13 +40,24 @@ export async function changePasswordAction(
   if (!verifyPassword(current, record.passwordHash)) {
     return fail("Check the highlighted fields", { currentPassword: "Current password is incorrect" });
   }
-  if (next.length < 8 || next.length > 128) {
-    return fail("Check the highlighted fields", { newPassword: "Password must be 8–128 characters" });
+  // F-10 (session-3): reuse the governed password schema instead of
+  // hand-rolled length rules (single source of truth for the policy).
+  const parsed = passwordSchema.safeParse(next);
+  if (!parsed.success) {
+    return fail("Check the highlighted fields", { newPassword: parsed.error.issues[0]?.message ?? "Invalid password" });
   }
   if (next !== confirm) {
     return fail("Check the highlighted fields", { confirmPassword: "Passwords do not match" });
   }
   await db.user.update({ where: { id: user.id }, data: { passwordHash: hashPassword(next) } });
+  // F-4 (session-3): a password rotation must revoke every OTHER session — a
+  // hijacked session previously survived the change. The current session (the
+  // caller's own cookie) is kept so the user isn't logged out mid-flow.
+  const keepToken = await currentSessionToken();
+  await db.session.deleteMany({
+    where: { userId: user.id, ...(keepToken ? { token: { not: keepToken } } : {}) },
+  });
+  revalidatePath("/account");
   return ok({ changed: true });
 }
 
@@ -104,9 +115,12 @@ export async function setDefaultAddressAction(addressId: string): Promise<Action
   if (!user) return fail("Sign in to manage your address book.");
   const existing = await db.address.findUnique({ where: { id: addressId } });
   if (!existing || existing.userId !== user.id) return fail("That address no longer exists.");
-  // Default is exclusive: clear others, then set.
-  await db.address.updateMany({ where: { userId: user.id, isDefault: true }, data: { isDefault: false } });
-  await db.address.update({ where: { id: addressId }, data: { isDefault: true } });
+  // Default is exclusive: clear others, then set — one transaction (F-13,
+  // session-3) so concurrent calls can't end with two or zero defaults.
+  await db.$transaction([
+    db.address.updateMany({ where: { userId: user.id, isDefault: true }, data: { isDefault: false } }),
+    db.address.update({ where: { id: addressId }, data: { isDefault: true } }),
+  ]);
   revalidatePath("/account");
   return ok({ done: true });
 }

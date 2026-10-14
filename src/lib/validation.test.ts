@@ -85,6 +85,21 @@ describe("checkoutSchema", () => {
     expect(parsed.country).toBe("United States");
   });
 
+  it("caps card-field payload lengths (F-10: no unbounded seams)", () => {
+    expect(
+      checkoutSchema.safeParse({ ...base, paymentMethod: "card", cardNumber: "4".repeat(33) }).success,
+    ).toBe(false);
+    expect(
+      checkoutSchema.safeParse({ ...base, paymentMethod: "card", cardExpiry: "1".repeat(8) }).success,
+    ).toBe(false);
+    expect(
+      checkoutSchema.safeParse({ ...base, paymentMethod: "card", cardCvc: "1".repeat(5) }).success,
+    ).toBe(false);
+    expect(
+      checkoutSchema.safeParse({ ...base, paymentMethod: "card", cardNumber: "4242 4242 4242 4242" }).success,
+    ).toBe(true);
+  });
+
   it("rejects a bad payment method enum", () => {
     expect(checkoutSchema.safeParse({ ...base, paymentMethod: "crypto" }).success).toBe(false);
   });

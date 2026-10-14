@@ -66,10 +66,23 @@ export function AccountTabs({
   const [passwordState, passwordAction, passwordPending] = useActionState(changePasswordAction, null);
   const [addressState, addressAction, addressPending] = useActionState(saveAddressAction, null);
   const [editing, setEditing] = useState<AccountAddressDto | null>(null);
+  // F-12 (session-3): address action failures used to vanish (`void (await …)`)
+  // — surface them inline instead.
+  const [addressError, setAddressError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
-  const removeAddress = (id: string) => startTransition(async () => void (await deleteAddressAction(id)));
-  const makeDefault = (id: string) => startTransition(async () => void (await setDefaultAddressAction(id)));
+  const removeAddress = (id: string) =>
+    startTransition(async () => {
+      setAddressError(null);
+      const res = await deleteAddressAction(id);
+      if (!res.ok) setAddressError(res.error.message);
+    });
+  const makeDefault = (id: string) =>
+    startTransition(async () => {
+      setAddressError(null);
+      const res = await setDefaultAddressAction(id);
+      if (!res.ok) setAddressError(res.error.message);
+    });
 
   return (
     <div className="py-14 px-6 lg:px-10">
@@ -133,6 +146,11 @@ export function AccountTabs({
           </TabsContent>
 
           <TabsContent value="addresses">
+            {addressError && (
+              <p role="alert" className="mb-4 text-xs font-montserrat text-destructive">
+                {addressError}
+              </p>
+            )}
             <div className="grid md:grid-cols-2 gap-6">
               {addresses.map((addr) => (
                 <div key={addr.id} className="border border-border p-6">

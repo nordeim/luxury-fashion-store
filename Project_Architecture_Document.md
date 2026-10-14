@@ -121,7 +121,11 @@ How to use this document: new engineers read §2–§4 for the mental model; deb
 │  │                              Newsletter, Footer  (chrome composed in the group layout)                  │
 │  ├─ (auth) route group: chrome-less login/register (measured slate cards)                                  │
 │  ├─ /api/health · /api/search · /api/newsletter                     (the only REST endpoints)              │
-│  ├─ security headers: Referrer-Policy, nosniff, HSTS, X-Frame-Options: DENY (next.config.ts)               │
+│  ├─ security headers (next.config.ts): CSP (env-conditional: dev adds      │
+│  │   'unsafe-eval'), Permissions-Policy, COOP, Referrer-Policy, nosniff,   │
+│  │   HSTS, X-Frame-Options: DENY                                           │
+│  ├─ src/instrumentation.ts ← boot-time env guard (AUTH_SECRET mandatory    │
+│  │   in production)                                                        │
 │  └─ src/lib/actions/*  ← THE mutation seam (Zod + authz + rate limits + transactions)                      │
 └───────────────┬────────────────────────────────────────────────────────────────────────────────────────────┘
                 │ Prisma 6.19 (datasource URL re-anchored via src/lib/db-path.ts)
@@ -168,8 +172,9 @@ luxury-fashion-store/
 ├── docs/
 │   ├── screenshots/            ← dev-server captures (parity evidence)
 │   └── legacy-homenest/        ← archived Vite-SPA lineage (sessions, remediation history)
-├── tests/e2e/                  ← Playwright: 9 spec files + global-setup + auth.setup
+├── tests/e2e/                  ← Playwright: 8 spec files + global-setup + auth.setup
 └── src/
+    ├── instrumentation.ts      ← boot-time env guard (production fails fast without AUTH_SECRET)
     ├── app/
     │   ├── layout.tsx          ← minimal root shell (fonts, metadata)
     │   ├── globals.css         ← Tailwind v4 @theme (hsl literals), @font-face, v4 trap pins
@@ -189,16 +194,17 @@ luxury-fashion-store/
     │   │                          footer, newsletter, announcement-bar, store-provider, ...
     │   ├── checkout/           ← 3-step wizard (client)
     │   ├── account/            ← tabs (orders/addresses/profile/settings), auth-form
-    │   └── ui/                 ← shadcn-style primitives (button, input, tabs, ...)
+    │   └── ui/                 ← tabs.tsx (the one Radix primitive in use; dead primitives removed in session 3)
     └── lib/
         ├── db.ts / db-path.ts  ← Prisma singleton + URL re-anchoring (ADR-002)
         ├── cart.ts / cart-dto.ts ← server cart domain / pure DTO contract (ADR split)
-        ├── auth.ts             ← scrypt, sessions, SafeUser, isAdmin
+        ├── auth.ts             ← scrypt, sessions, SafeUser, isAdmin, strict authSecret()
         ├── actions/            ← auth, cart, wishlist, checkout, account, admin ("use server")
         ├── action-result.ts    ← { ok, data | error{message, fieldErrors} } envelope
         ├── validation.ts       ← Zod schemas + validateRedirectPath + isLuhnValid
-        ├── rate-limit.ts       ← in-memory fixed-window limiter
-        ├── order-token.ts      ← HMAC guest order-view capability tokens
+        ├── rate-limit.ts       ← in-memory fixed-window limiter (TRUST_PROXY-gated client IP)
+        ├── order-token.ts      ← HMAC guest order-view capability tokens (authSecret()-backed)
+        ├── address.ts          ← schema-checked shipping-address parser (no raw JSON.parse)
         ├── money.ts / delivery.ts / products.ts
         └── data/catalog.ts     ← reference-extracted catalog, slides, menus, demo users
 ```
@@ -301,7 +307,7 @@ erDiagram
 | `WishlistItem` | wishlistId, productId | unique pair |
 | `Order` | number (`ORD-YYYY-NNN`), userId (nullable = guest), email, status, subtotal/shipping/total (cents), shippingAddress (JSON), paymentMethod, cardLast4, paymentStatus | guest views gated by HMAC token |
 | `OrderItem` | orderId, productId, name/brand/image/size/unitPrice snapshots | immutable at purchase time |
-| `OrderEvent` | orderId, type, createdAt | status timeline (placed → …) |
+| `OrderEvent` | orderId, type, actor (`system` \| `admin`, default `system`), createdAt | status timeline (placed → …); customer view hides `actor="admin"` notes |
 | `NewsletterSubscriber` | email (unique) | `/api/newsletter` |
 
 ### 4.2 Persistence Strategy
@@ -387,9 +393,9 @@ Hero crossfade `transition-opacity duration-700`, auto-rotate 5000ms; drawers/ov
 
 | Category | Files | Tests | Location | Framework |
 |---|---|---|---|---|
-| Unit (pure seams) | 6 | 52 | `src/lib/*.test.ts` | Vitest (node) |
+| Unit (pure seams) | 7 | 64 | `src/lib/*.test.ts` | Vitest (node) |
 | E2E setup | 1 | 1×2 projects | `tests/e2e/auth.setup.ts` | Playwright |
-| E2E functional | 9 | 62 runs | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
+| E2E functional | 8 | 62 runs | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
 
 E2E coverage map: home (hero/sections/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related) · cart+checkout (drawer steppers, empty state, totals, COD end-to-end) · auth (login card, wrong-password alert, register validation, logout) · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px, stacking, navigation, Escape/backdrop close)** · admin (role gate + console pages).
 
@@ -489,7 +495,7 @@ Single-branch (main) with atomic, descriptive commits; the pre-push gate is `npm
 | `src/components/store/header.tsx` | 142 | Sticky chrome, dropdowns, icon cluster, badges |
 | `src/components/store/mobile-nav.tsx` | 103 | Parity-critical drawer (flex gap-5 pin) |
 | `src/components/checkout/checkout-flow.tsx` | ~300 | 3-step wizard; card state; startTransition dispatch |
-| `src/lib/actions/checkout.ts` | 168 | Transactional order placement, stock guard, HMAC tokens |
+| `src/lib/actions/checkout.ts` | ~200 | Transactional order placement (P2002 retry), stock guard, HMAC tokens |
 | `src/lib/cart.ts` / `cart-dto.ts` | 230/40 | Server cart domain / pure DTO contract |
 | `src/lib/db-path.ts` | 62 | Schema-relative URL resolution (pinned by tests) |
 | `src/lib/validation.ts` | ~120 | Zod schemas, redirect guard, Luhn |

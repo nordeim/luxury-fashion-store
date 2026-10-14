@@ -18,15 +18,27 @@ export async function toggleWishlistAction(productId: string): Promise<ActionRes
   if (!product) return fail("This piece is no longer available.");
 
   const wishlistId = await getOrCreateWishlist(user?.id ?? null);
-  const existing = await db.wishlistItem.findUnique({
-    where: { wishlistId_productId: { wishlistId, productId } },
-  });
-  if (existing) {
-    await db.wishlistItem.delete({ where: { id: existing.id } });
+
+  // F-3 (session-3): the delete/create toggle raced on the @@unique (two rapid
+  // toggles, or toggle+merge) and threw P2002 across the seam. Resolve the
+  // winner by existence inside a transaction, and map residual races to the
+  // envelope instead of throwing.
+  try {
+    const wishlisted = await db.$transaction(async (tx) => {
+      const existing = await tx.wishlistItem.findUnique({
+        where: { wishlistId_productId: { wishlistId, productId } },
+      });
+      if (existing) {
+        await tx.wishlistItem.delete({ where: { id: existing.id } });
+        return false;
+      }
+      await tx.wishlistItem.create({ data: { wishlistId, productId } });
+      return true;
+    });
     revalidatePath("/", "layout");
-    return ok({ wishlisted: false });
+    return ok({ wishlisted });
+  } catch (error) {
+    console.error("toggleWishlistAction failed", error);
+    return fail("We couldn't update your wishlist. Please try again.");
   }
-  await db.wishlistItem.create({ data: { wishlistId, productId } });
-  revalidatePath("/", "layout");
-  return ok({ wishlisted: true });
 }

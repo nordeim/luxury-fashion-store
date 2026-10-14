@@ -19,27 +19,48 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, results: [] });
   }
 
-  const products = await db.product.findMany({
-    where: {
-      isActive: true,
-      OR: [
-        { name: { contains: q } },
-        { brand: { contains: q } },
-        { subcategory: { contains: q } },
-      ],
-    },
-    select: { slug: true, name: true, brand: true, images: true, price: true },
-    orderBy: [{ isBestseller: "desc" }, { sortOrder: "asc" }],
-    take: limit,
-  });
+  // F-12 (session-3): a DB blip or corrupt row used to 500 the API — reads are
+  // best-effort typeahead, so failures degrade to an empty result set.
+  try {
+    const products = await db.product.findMany({
+      where: {
+        isActive: true,
+        OR: [
+          { name: { contains: q } },
+          { brand: { contains: q } },
+          { subcategory: { contains: q } },
+        ],
+      },
+      select: { slug: true, name: true, brand: true, images: true, price: true },
+      orderBy: [{ isBestseller: "desc" }, { sortOrder: "asc" }],
+      take: limit,
+    });
 
-  const results = products.map((p) => ({
-    slug: p.slug,
-    name: p.name,
-    brand: p.brand,
-    image: (JSON.parse(p.images || "[]") as string[])[0] ?? "",
-    price: p.price,
-  }));
+    const results = products.map((p) => ({
+      slug: p.slug,
+      name: p.name,
+      brand: p.brand,
+      image: firstImage(p.images),
+      price: p.price,
+    }));
 
-  return NextResponse.json({ ok: true, results });
+    return NextResponse.json({ ok: true, results });
+  } catch (error) {
+    console.error("search failed", error);
+    return NextResponse.json({ ok: false, results: [] }, { status: 503 });
+  }
+}
+
+/** Same hardened contract as cart.ts firstImage — tolerate corrupt JSON. */
+function firstImage(raw: string): string {
+  try {
+    const parsed: unknown = JSON.parse(raw || "[]");
+    if (Array.isArray(parsed)) {
+      const first = parsed.find((x): x is string => typeof x === "string");
+      return first ?? "";
+    }
+  } catch {
+    // fall through
+  }
+  return "";
 }

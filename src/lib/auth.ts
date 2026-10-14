@@ -26,6 +26,18 @@ function authSecret(): string {
   return secret;
 }
 
+/**
+ * Governed HMAC secret for every capability token in the app (sessions AND
+ * guest order views). F-1 (session-3): order-token.ts previously kept its own
+ * lenient fallback — with no cookie present `getCurrentUser` returns early,
+ * `authSecret` never runs, and a misconfigured production deploy would mint
+ * order-view tokens HMAC'd with a public constant (sequential order numbers
+ * made every guest order readable). One validated source, shared everywhere.
+ */
+export function capabilitySecret(): string {
+  return authSecret();
+}
+
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(password, salt, SCRYPT_KEYLEN).toString("hex");
@@ -94,6 +106,15 @@ export async function destroySession(): Promise<void> {
     }
   }
   store.delete(SESSION_COOKIE);
+}
+
+/** The caller's current session token (null when anonymous) — lets actions
+ * scope "revoke all other sessions" without logging the caller out. */
+export async function currentSessionToken(): Promise<string | null> {
+  const store = await cookies();
+  const raw = store.get(SESSION_COOKIE)?.value;
+  if (!raw) return null;
+  return parseCookieValue(raw);
 }
 
 /** Resolve the signed-in user from the session cookie (null when anonymous). */

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { getCartDto } from "@/lib/cart";
 import { CheckoutFlow } from "@/components/checkout/checkout-flow";
+import { db } from "@/lib/db";
 
 export const metadata: Metadata = { title: "Checkout" };
 export const dynamic = "force-dynamic";
@@ -13,9 +14,9 @@ export default async function CheckoutPage() {
   if (cart.lines.length === 0) redirect("/cart");
 
   const defaultAddress = user
-    ? (await (await import("@/lib/db")).db.address.findFirst({
+    ? ((await db.address.findFirst({
         where: { userId: user.id, isDefault: true },
-      })) ?? null
+      })) ?? null)
     : null;
 
   return (

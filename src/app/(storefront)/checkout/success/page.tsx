@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { verifyOrderViewToken } from "@/lib/order-token";
 import { formatCents } from "@/lib/money";
 import { estimateDelivery } from "@/lib/delivery";
+import { parseShippingAddress } from "@/lib/address";
 import { CheckCircle2, Package, Truck } from "lucide-react";
 
 export const metadata: Metadata = { title: "Order Confirmed" };
@@ -32,14 +33,8 @@ export default async function CheckoutSuccessPage({ searchParams }: SuccessPageP
   const isGuestWithToken = !order.userId && token && verifyOrderViewToken(order.number, token);
   if (!isOwner && !isGuestWithToken) notFound();
 
-  const address = JSON.parse(order.shippingAddress) as {
-    fullName: string;
-    street: string;
-    city: string;
-    state: string;
-    zip: string;
-    country: string;
-  };
+  // F-8 (session-3): safe parse — a corrupted address row must not 500 the page.
+  const address = parseShippingAddress(order.shippingAddress);
   const delivery = estimateDelivery(order.placedAt);
 
   return (

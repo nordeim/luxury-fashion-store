@@ -28,6 +28,10 @@ test.describe("admin console (admin session)", () => {
     await expect(page).not.toHaveURL(/\/account/);
     // Dashboard surfaces the role-gated metrics.
     await expect(page.getByText(/revenue|orders/i).first()).toBeVisible();
+    // Regression pin (session 3, F-19 follow-up): the Products KPI must show the
+    // full seeded catalog (12), not the low-stock-filtered count.
+    const productsCard = page.getByText("Products", { exact: true }).locator("..");
+    await expect(productsCard).toHaveText(/12/);
 
     await page.goto("/admin/orders");
     await expect(page.getByText(/ORD-\d{4}-\d{3}/).first()).toBeVisible();

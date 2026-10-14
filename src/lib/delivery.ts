@@ -22,8 +22,12 @@ function addBusinessDays(from: Date, days: number): Date {
 export function estimateDelivery(from: Date = new Date()): DeliveryWindow {
   const fromDay = addBusinessDays(from, 2);
   const toDay = addBusinessDays(from, 4);
+  // F-15 (session-3): pin the formatter's timezone — this label renders on
+  // BOTH the server and the client (SSR'd client component), and a TZ-dependent
+  // format produces hydration text mismatches for evening visitors. UTC keeps
+  // server and client byte-identical.
   const fmt = (d: Date) =>
-    d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
   return {
     from: fromDay,
     to: toDay,

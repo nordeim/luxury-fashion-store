@@ -22,26 +22,37 @@ export async function adminUpdateOrderAction(
   const admin = await requireAdmin();
   if (!admin) return fail("Admin access required.");
 
+  // F-9 (session-3): distinguish "field absent" (keep stored value) from
+  // "field present but empty" (clear it) — an admin could previously never
+  // erase a carrier/tracking number once set.
   const parsed = adminOrderUpdateSchema.safeParse({
     orderId: formData.get("orderId"),
     status: formData.get("status") || undefined,
-    carrier: formData.get("carrier") || undefined,
-    trackingNumber: formData.get("trackingNumber") || undefined,
+    carrier: formData.has("carrier") ? String(formData.get("carrier") ?? "").trim() || "" : undefined,
+    trackingNumber: formData.has("trackingNumber")
+      ? String(formData.get("trackingNumber") ?? "").trim() || ""
+      : undefined,
   });
   if (!parsed.success) return fail("Check the highlighted fields.");
 
-  const { orderId, status, carrier, trackingNumber } = parsed.data;
+  const { orderId } = parsed.data;
+  const carrier = parsed.data.carrier === undefined ? undefined : parsed.data.carrier || null;
+  const trackingNumber =
+    parsed.data.trackingNumber === undefined ? undefined : parsed.data.trackingNumber || null;
   const order = await db.order.findUnique({ where: { id: orderId } });
   if (!order) return fail("That order no longer exists.");
 
   await db.$transaction(async (tx) => {
     if (status && status !== order.status) {
       await tx.order.update({ where: { id: orderId }, data: { status } });
+      // F-16 (session-3): internal events are stamped actor:"admin" with a
+      // clean note (no admin email in customer-visible timelines).
       await tx.orderEvent.create({
         data: {
           orderId,
           type: "status_changed",
-          note: `${order.status} → ${status} by ${admin.email}`,
+          actor: "admin",
+          note: `${order.status} → ${status}`,
         },
       });
     }
@@ -57,7 +68,8 @@ export async function adminUpdateOrderAction(
         data: {
           orderId,
           type: "tracking_added",
-          note: `${carrier ?? order.carrier ?? "Carrier"} — ${trackingNumber ?? order.trackingNumber ?? ""} by ${admin.email}`,
+          actor: "admin",
+          note: `${carrier ?? order.carrier ?? "Carrier"} — ${trackingNumber ?? order.trackingNumber ?? ""}`.trim(),
         },
       });
     }

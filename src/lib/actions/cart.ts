@@ -18,6 +18,16 @@ function clampToStock(requested: number, stock: number): number {
   return Math.max(1, Math.min(requested, Math.max(stock, 0)));
 }
 
+/** Prisma unique-constraint violation (P2002) — the concurrent-write signal. */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002"
+  );
+}
+
 export async function addToCartAction(
   productId: string,
   size: string,
@@ -36,18 +46,32 @@ export async function addToCartAction(
   }
   const cartId = await getOrCreateCart(user?.id ?? null);
 
-  const existing = await db.cartItem.findUnique({
-    where: { cartId_productId_size: { cartId, productId: input.productId, size: input.size } },
-  });
-  const requestedQty = (existing?.quantity ?? 0) + input.quantity;
-  const clamped = clampToStock(requestedQty, product.stock);
-
-  if (existing) {
-    await db.cartItem.update({ where: { id: existing.id }, data: { quantity: clamped } });
-  } else {
-    await db.cartItem.create({
-      data: { cartId, productId: input.productId, size: input.size, quantity: clampToStock(input.quantity, product.stock) },
+  // F-3 (session-3): the read-then-write race (two concurrent adds of the same
+  // (cart, product, size)) used to hit the @@unique and throw P2002 across the
+  // seam. Retry once on the unique violation — the retry re-reads and takes the
+  // update path. Any other failure maps to the ActionResult envelope.
+  const upsertLine = async (): Promise<void> => {
+    const existing = await db.cartItem.findUnique({
+      where: { cartId_productId_size: { cartId, productId: input.productId, size: input.size } },
     });
+    if (existing) {
+      const requestedQty = existing.quantity + input.quantity;
+      await db.cartItem.update({ where: { id: existing.id }, data: { quantity: clampToStock(requestedQty, product.stock) } });
+    } else {
+      await db.cartItem.create({
+        data: { cartId, productId: input.productId, size: input.size, quantity: clampToStock(input.quantity, product.stock) },
+      });
+    }
+  };
+  try {
+    await upsertLine();
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      await upsertLine();
+    } else {
+      console.error("addToCartAction failed", error);
+      return fail("We couldn't update your bag. Please try again.");
+    }
   }
 
   revalidatePath("/", "layout");

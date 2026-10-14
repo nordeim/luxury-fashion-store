@@ -1,6 +1,6 @@
 # AURELIA — Luxury Fashion E-Commerce (VELOUR)
 
-![Next.js](https://img.shields.io/badge/Next.js-16.4-000000) ![React](https://img.shields.io/badge/React-19.3-61dafb) ![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20strict-3178c6) ![Tailwind](https://img.shields.io/badge/TailwindCSS-4.3-38bdf8) ![Prisma](https://img.shields.io/badge/Prisma-6.19-2D3748) ![Tests](https://img.shields.io/badge/tests-52%20unit%20%2B%2062%20e2e-brightgreen)
+![Next.js](https://img.shields.io/badge/Next.js-16.4-000000) ![React](https://img.shields.io/badge/React-19.3-61dafb) ![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20strict-3178c6) ![Tailwind](https://img.shields.io/badge/TailwindCSS-4.3-38bdf8) ![Prisma](https://img.shields.io/badge/Prisma-6.19-2D3748) ![Tests](https://img.shields.io/badge/tests-64%20unit%20%2B%2062%20e2e-brightgreen)
 
 A production-grade luxury fashion storefront + admin console — a **functional superset** of the reference prototype `pastel-aurelia-fashion-edit.base44.app` with resting-state visual parity: full catalog, cart, guest+member checkout, wishlist, customer accounts, and a role-gated admin, where the reference shipped inert buttons and two pages.
 
@@ -38,7 +38,7 @@ The reference site is a polished **visual prototype**: working login, cart drawe
 | ORM / DB | Prisma + SQLite | 6.19.3 | 13 models, single-file DB at `db/custom.db` |
 | Auth | Custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 | Validation | Zod | 3.25.76 | Every seam (forms, actions, admin updates) |
-| Testing | Vitest 3.2.7 + Playwright 1.64.0 | — | 52 unit + 62 E2E (chromium + mobile) |
+| Testing | Vitest 3.2.7 + Playwright 1.64.0 | — | 64 unit + 62 E2E (chromium + mobile) |
 
 ```text
 Browser ── RSC pages (force-dynamic)
@@ -73,8 +73,8 @@ Demo accounts (also printed on `/login`):
 ## Testing
 
 ```bash
-npm run verify        # typecheck → lint → vitest (52) → production build
-npm run test:e2e      # Playwright: builds nothing; uses the last build (62 E2E + 2 setup)
+npm run verify        # typecheck → lint → vitest (64) → production build
+npm run test:e2e      # Playwright: boots the production standalone (build FIRST — 62 E2E + 2 setup)
 npx playwright test tests/e2e/mobile-navigation.spec.ts   # single spec
 npx vitest run src/lib/money.test.ts                      # single unit file
 ```
@@ -106,7 +106,7 @@ PORT=3000 NODE_ENV=production AUTH_SECRET=<secret> DATABASE_URL="file:<absolute>
 | Reference recon (computed-style spec) | ✅ | `recon` artifacts + measured pins |
 | Transformation to Next.js 16 | ✅ | Vite SPA lineage archived in `docs/legacy-homenest/` |
 | Functional superset (PLP/PDP/cart/checkout/account/admin) | ✅ | All commerce paths live |
-| Test suites (vitest + playwright) | ✅ | 52 unit · 62 E2E + 2 setup, all green |
+| Test suites (vitest + playwright) | ✅ | 64 unit · 62 E2E + 2 setup, all green |
 | Docs (AGENTS/CLAUDE/README/PAD + distilled SKILL.md) | ✅ | This release |
 
 ## License

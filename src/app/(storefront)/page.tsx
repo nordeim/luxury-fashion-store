@@ -12,6 +12,7 @@ export default async function HomePage() {
     where: { isActive: true },
     include: { category: true },
     orderBy: { sortOrder: "asc" },
+    take: 60, // F-19 (session-3): bounded read; the catalog is 12 today
   });
   const dto = products.map(toProductCardData);
   return <StorefrontHome products={dto} />;

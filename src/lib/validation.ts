@@ -67,9 +67,12 @@ export const checkoutSchema = z.object({
   zip: z.string().trim().min(3, "Enter a valid ZIP").max(12),
   country: z.string().trim().min(1).max(80).default("United States"),
   paymentMethod: z.enum(["card", "cod"]),
-  cardNumber: z.string().optional(),
-  cardExpiry: z.string().optional(),
-  cardCvc: z.string().optional(),
+  // F-10 (session-3): caps keep the demo-card seam bounded — real validation
+  // (digits/expiry/Luhn) happens later in the action, but the schema should
+  // reject oversized payloads up front. Lengths include formatting spaces.
+  cardNumber: z.string().max(32).optional(),
+  cardExpiry: z.string().max(7).optional(),
+  cardCvc: z.string().max(4).optional(),
 });
 
 export const orderStatusSchema = z.enum(["processing", "in_transit", "delivered", "cancelled"]);

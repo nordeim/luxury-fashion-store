@@ -24,13 +24,15 @@ interface StoreContextValue {
   cart: CartDto;
   user: StoreUser | null;
   wishlist: Set<string>;
-  hydrated: boolean;
   cartOpen: boolean;
   mobileNavOpen: boolean;
   searchOpen: boolean;
   setCart: (cart: CartDto) => void;
   setUser: (user: StoreUser | null) => void;
-  setWishlist: (ids: Set<string>) => void;
+  /** Accepts a value or a functional updater — toggles must read
+   * `prev`, not the render-time snapshot (F-11, session-3: rapid toggles on
+   * different products used to overwrite each other with stale state). */
+  setWishlist: (ids: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
   setCartOpen: (open: boolean) => void;
   setMobileNavOpen: (open: boolean) => void;
   setSearchOpen: (open: boolean) => void;
@@ -72,14 +74,17 @@ export function StoreProvider({ children, initialCart, initialUser, initialWishl
   }
 
   const setCart = useCallback((next: CartDto) => setCartState(next), []);
-  const setWishlist = useCallback((ids: Set<string>) => setWishlistState(ids), []);
+  const setWishlist = useCallback(
+    (ids: Set<string> | ((prev: Set<string>) => Set<string>)) =>
+      setWishlistState((prev) => (typeof ids === "function" ? ids(prev) : ids)),
+    [],
+  );
 
   const value = useMemo<StoreContextValue>(
     () => ({
       cart,
       user,
       wishlist,
-      hydrated: true,
       cartOpen,
       mobileNavOpen,
       searchOpen,

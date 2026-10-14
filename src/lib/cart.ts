@@ -165,21 +165,32 @@ export async function mergeGuestCartIntoUser(userId: string): Promise<void> {
     update: {},
     create: { userId, token: randomBytes(24).toString("hex") },
   });
-  for (const item of guestCart.items) {
-    const existing = await db.cartItem.findUnique({
-      where: { cartId_productId_size: { cartId: userCart.id, productId: item.productId, size: item.size } },
-    });
-    if (existing) {
-      await db.cartItem.update({
-        where: { id: existing.id },
-        data: { quantity: Math.max(existing.quantity, item.quantity) },
+  // F-13 (session-3): one transaction + stock clamp — the old per-item loop
+  // could partially fail (merged items, guest cart left behind → duplicates),
+  // and merged quantities were never clamped against product stock.
+  const productIds = [...new Set(guestCart.items.map((i) => i.productId))];
+  const products = await db.product.findMany({
+    where: { id: { in: productIds } },
+    select: { id: true, stock: true },
+  });
+  const stockById = new Map(products.map((p) => [p.id, p.stock]));
+  await db.$transaction(async (tx) => {
+    for (const item of guestCart.items) {
+      const stock = stockById.get(item.productId);
+      if (stock === undefined || stock <= 0) continue; // product gone or unbuyable
+      const existing = await tx.cartItem.findUnique({
+        where: { cartId_productId_size: { cartId: userCart.id, productId: item.productId, size: item.size } },
       });
-    } else {
-      await db.cartItem.create({
-        data: { cartId: userCart.id, productId: item.productId, size: item.size, quantity: item.quantity },
-      });
+      const mergedQty = Math.max(1, Math.min(Math.max(existing?.quantity ?? 0, item.quantity), stock));
+      if (existing) {
+        await tx.cartItem.update({ where: { id: existing.id }, data: { quantity: mergedQty } });
+      } else {
+        await tx.cartItem.create({
+          data: { cartId: userCart.id, productId: item.productId, size: item.size, quantity: mergedQty },
+        });
+      }
     }
-  }
+  });
   await db.cart.delete({ where: { id: guestCart.id } }).catch(() => undefined);
 }
 

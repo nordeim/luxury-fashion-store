@@ -222,9 +222,13 @@ export function AuthForm({ mode, redirectTo }: AuthFormProps) {
             </div>
           </div>
         </div>
-        <p className="text-center text-xs text-slate-400 mt-4 font-montserrat">
-          Demo accounts — customer: {DEMO_USERS.customer.email} / {DEMO_USERS.customer.password} · admin: {DEMO_USERS.admin.email} / {DEMO_USERS.admin.password}
-        </p>
+        {/* F-5 (session-3): demo credentials are a dev convenience — never
+            print the seeded admin login on a production login page. */}
+        {process.env.NODE_ENV !== "production" && (
+          <p className="text-center text-xs text-slate-400 mt-4 font-montserrat">
+            Demo accounts — customer: {DEMO_USERS.customer.email} / {DEMO_USERS.customer.password} · admin: {DEMO_USERS.admin.email} / {DEMO_USERS.admin.password}
+          </p>
+        )}
       </div>
     </main>
   );

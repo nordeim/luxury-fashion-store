@@ -48,17 +48,21 @@ export function CheckoutFlow({
   });
   const email = user?.email ?? "";
   const [emailInput, setEmailInput] = useState(email);
-  const [placing, setPlacing] = useState(false);
   // Card details live in STATE, not the DOM: the step-2 review unmounts the
   // step-1 inputs, so reading them by id at submit time would always see
   // null (and every card order would fail Luhn). Controlled inputs keep the
   // values alive across wizard steps.
   const [card, setCard] = useState({ number: "", expiry: "", cvc: "" });
 
-  const [state, formAction] = useActionState<ActionResult<PlacedOrderResult> | null, FormData>(
+  const [state, formAction, isPending] = useActionState<ActionResult<PlacedOrderResult> | null, FormData>(
     placeOrderAction,
     null,
   );
+
+  // F-2 (session-3): the button follows the action's real pending state — the
+  // old fixed 4s setTimeout re-enabled it mid-flight on slow requests, opening
+  // a double-submit window (duplicate orders / double stock reads).
+  const placing = isPending;
 
   useEffect(() => {
     if (state?.ok) {
@@ -82,7 +86,6 @@ export function CheckoutFlow({
   };
 
   const submit = () => {
-    setPlacing(true);
     // Build FormData for the server action (single transactional seam).
     const fd = new FormData();
     fd.set("email", user ? email : emailInput);
@@ -101,7 +104,6 @@ export function CheckoutFlow({
     // React contract: async action fns must dispatch inside a transition —
     // a bare call skips pending state and drops the result update.
     startTransition(() => formAction(fd));
-    setTimeout(() => setPlacing(false), 4000);
   };
 
   const inputCls =

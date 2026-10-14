@@ -40,10 +40,13 @@ export function ProductDetail({ product, related }: { product: ProductCardData; 
     startTransition(async () => {
       const res = await toggleWishlistAction(product.id);
       if (res.ok) {
-        const next = new Set(wishlist);
-        if (res.data.wishlisted) next.add(product.id);
-        else next.delete(product.id);
-        setWishlist(next);
+        // F-11: read the previous set inside the updater — never the render-time snapshot.
+        setWishlist((prev) => {
+          const next = new Set(prev);
+          if (res.data.wishlisted) next.add(product.id);
+          else next.delete(product.id);
+          return next;
+        });
       }
     });
   };

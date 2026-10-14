@@ -59,7 +59,7 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | Styling | Tailwind CSS (CSS-first `@theme`) | 4.3.3 | v4 traps — see §9 #1–#2 |
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
-| Unit tests | Vitest (node env) | 3.2.7 | 52 tests in `src/lib/*.test.ts` |
+| Unit tests | Vitest (node env) | 3.2.7 | 64 tests in `src/lib/*.test.ts` |
 | E2E | Playwright (standalone server) | 1.64.0 | 62 executions + 2 setup |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
@@ -85,6 +85,7 @@ curl localhost:3000/api/health   # → {"ok":true,"db":true}
 |---|---|---|
 | `DATABASE_URL` | yes | `file:../db/custom.db` — **schema-relative** (Prisma CLI resolves against `prisma/`, landing at `<repoRoot>/db/custom.db` regardless of CWD) |
 | `AUTH_SECRET` | yes (prod) | Session-cookie + order-view HMAC secret |
+| `TRUST_PROXY` | no | Set `=1` only behind a trusted reverse proxy; enables `x-forwarded-for` for the rate limiter (`clientIpFrom`) |
 | `NEXT_PUBLIC_SITE_URL` | optional | canonical/og:url fallback + sitemap origin (default `http://localhost:3000`) |
 
 **Binding rules:**
@@ -277,6 +278,15 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
 14. **Google Fonts at build/runtime** — a network dependency that breaks hermetic
     builds. Fonts are self-hosted woff2 in `public/fonts/`.
 15. **Dead catalog image URLs** — reference-era URLs rot. Audit before shipping (§7).
+16. **E2E validates the last BUILD, not the last edit** — the Playwright webServer
+    boots `node .next/standalone/server.js`. A source fix without a fresh
+    `npm run build` is invisible to the suite (and `reuseExistingServer` will happily
+    keep serving the stale bundle). Symptom: a fix "doesn't work" only under E2E.
+    Ritual: **build → then E2E**, always (§11).
+17. **CSP must be env-conditional** — React **dev** needs `'unsafe-eval'` (refresh
+    runtime); production must not have it. `next.config.ts` builds the policy from
+    `process.env.NODE_ENV`. Symptom in dev if wrong: console CSP violations, blank
+    hydration.
 
 ## §10 Debugging Guide (symptom → cause → fix)
 
@@ -293,13 +303,15 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
 | Cart badge stale after an action | Client didn't re-sync from action DTO | Return the DTO; merge in `StoreProvider` (§6 pattern 1) |
 | DB lands in the wrong location | Sandbox `DATABASE_URL` override | `env -u DATABASE_URL` + check `src/lib/db-path.ts` resolution via its tests |
 | "X-Frame-Options" / clickjacking complaints in embedders | Security headers ship from `next.config.ts` | Intentional (DENY) — do not remove |
+| Fix verified in `next dev` but E2E still fails on the old behavior | Stale standalone bundle (§9 #16) | `env -u DATABASE_URL npm run build`, then re-run `npm run test:e2e` |
+| Console full of CSP violations in dev; page half-hydrates | Production CSP applied to dev | Keep the `unsafe-eval` dev-conditional in `next.config.ts` (§9 #17) |
 
 ## §11 Pre-Ship Checklist
 
 ```bash
-npm run verify                      # typecheck → lint → 52 unit → build (+ assemble)
-npm run test:e2e                    # 62 executions + 2 setup (build FIRST — standalone)
-curl localhost:3100/api/health      # (if running standalone manually)
+npm run verify                      # typecheck → lint → 64 unit → build (+ assemble)
+npm run test:e2e                    # 62 executions + 2 setup (build FIRST — standalone, §9 #16)
+curl -sI localhost:3000/ | grep -i content-security   # CSP present (no unsafe-eval in prod)
 
 # Parity pins
 rg -n "space-y-" src/components/store || echo "OK: no space-y on parity surfaces"
@@ -339,6 +351,12 @@ suites; no `db/*.db` staged; commit goes to `main` only.
    browser bundle — model new contracts the same way.
 8. **Docs are part of the gate.** README/CLAUDE.md counts are verified against the
    actual suites every session; drift in docs is treated as drift in code.
+9. **Narrowing a query is a contract change — audit every consumer.** Session 3's
+   F-19 replaced the admin dashboard's load-all-products query with the low-stock
+   filter but left the Products KPI reading the same variable: the card silently
+   showed 0 instead of 12. E2E only asserted visibility, not value. Rule: when a
+   query's shape changes, grep its consumers, and pin **values** (not just
+   visibility) for KPI surfaces.
 
 ## §13 Pitfalls to Avoid (the "don't" list)
 
@@ -518,8 +536,15 @@ interface WishlistDto { productIds: Set<string> }
 const EMPTY_WISHLIST: WishlistDto;
 
 // src/lib/order-token.ts — guest order-view capability
-function orderViewToken(orderNumber: string): string;          // HMAC-SHA256, 40 chars
+// Secret comes from the strict authSecret() (throws in production if AUTH_SECRET
+// is unset — boot-time guard in src/instrumentation.ts makes that a startup error).
+function orderViewToken(orderNumber: string): string;          // HMAC-SHA256, timing-safe compare
 function verifyOrderViewToken(orderNumber: string, token: string): boolean;
+
+// src/lib/address.ts — schema-checked shipping-address reader (replaces raw JSON.parse)
+interface ShippingAddress { fullName: string; phone: string; address1: string;
+  address2?: string; city: string; state: string; postalCode: string; country: string }
+function parseShippingAddress(raw: string | null | undefined): ShippingAddress | null;
 
 // src/lib/money.ts — integer-cents helpers (format only at display time)
 // src/lib/validation.ts — Zod schemas for every seam
@@ -528,8 +553,12 @@ function verifyOrderViewToken(orderNumber: string, token: string): boolean;
 
 **Prisma models (13):** `User`, `Session`, `Address`, `Category`, `Product`,
 `Cart`, `CartItem`, `Wishlist`, `WishlistItem`, `Order`, `OrderItem`,
-`OrderEvent`, `NewsletterSubscriber` — SQLite has no enums; statuses are strings
-Zod-validated at every seam; money columns are integer cents.
+`OrderEvent` (has `actor`: `system` \| `admin`, default `system` — the customer
+order view hides admin notes by filtering `actor === "admin"`),
+`NewsletterSubscriber` — SQLite has no enums; statuses are strings
+Zod-validated at every seam; money columns are integer cents. FK child lookups
+are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
+`WishlistItem.wishlistId`).
 
 ---
 
@@ -553,8 +582,8 @@ Zod-validated at every seam; money columns are integer cents.
 | Commands & env | `AGENTS.md` |
 | Working standards | `CLAUDE.md` |
 | Deep architecture + ADRs | `Project_Architecture_Document.md` |
-| Latest remediation ledger | `docs/remediation-plan-session2.md` |
-| Session history | `docs/session_1.md`, `worklog.md` |
+| Latest remediation ledger | `docs/remediation-plan-session3.md` |
+| Session history | `docs/session_1.md`, `docs/session_2.md`, `worklog.md` |
 | Parity screenshots | `docs/screenshots/` |
 | Mutation seam | `src/lib/actions/*.ts` |
 | Envelope | `src/lib/action-result.ts` |

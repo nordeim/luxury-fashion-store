@@ -16,6 +16,7 @@ export default async function AccountPage() {
       where: { userId: user.id },
       orderBy: { placedAt: "desc" },
       include: { items: true },
+      take: 50, // F-19 (session-3): bounded history page
     }),
     db.address.findMany({
       where: { userId: user.id },

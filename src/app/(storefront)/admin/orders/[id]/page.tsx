@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatCents } from "@/lib/money";
+import { parseShippingAddress } from "@/lib/address";
 import { AdminOrderActions } from "@/components/account/admin-order-actions";
 
 export const metadata: Metadata = { title: "Admin — Order Detail" };
@@ -26,14 +27,8 @@ export default async function AdminOrderDetailPage({
   });
   if (!order) notFound();
 
-  const address = JSON.parse(order.shippingAddress) as {
-    fullName: string;
-    street: string;
-    city: string;
-    state: string;
-    zip: string;
-    country: string;
-  };
+  // F-8 (session-3): safe parse — a corrupted address row must not 500 the page.
+  const address = parseShippingAddress(order.shippingAddress);
 
   return (
     <div className="py-14 px-6 lg:px-10">

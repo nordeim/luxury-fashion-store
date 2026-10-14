@@ -16,12 +16,16 @@ export default async function AdminPage() {
   if (!user) redirect("/login?redirect=/admin");
   if (!(await isAdmin())) redirect("/account");
 
-  const [orders, products, revenueAgg] = await Promise.all([
+  const [orders, lowStock, productCount, revenueAgg] = await Promise.all([
     db.order.findMany({ orderBy: { placedAt: "desc" }, take: 8 }),
-    db.product.findMany({ orderBy: { sortOrder: "asc" } }),
+    db.product.findMany({
+      where: { isActive: true, stock: { lte: 3 } },
+      orderBy: { sortOrder: "asc" },
+      take: 20,
+    }),
+    db.product.count(),
     db.order.aggregate({ _sum: { total: true }, _count: true }),
   ]);
-  const lowStock = products.filter((p) => p.stock <= 3 && p.isActive);
 
   return (
     <div className="py-14 px-6 lg:px-10">
@@ -37,7 +41,7 @@ export default async function AdminPage() {
           {[
             { label: "Revenue", value: formatCents(revenueAgg._sum.total ?? 0) },
             { label: "Orders", value: String(revenueAgg._count) },
-            { label: "Products", value: String(products.length) },
+            { label: "Products", value: String(productCount) },
             { label: "Low Stock", value: String(lowStock.length) },
           ].map((stat) => (
             <div key={stat.label} className="border border-border bg-card p-6">

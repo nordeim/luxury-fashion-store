@@ -14,12 +14,7 @@
 import Link from "next/link";
 import { ChevronDown, Heart, Search, ShoppingBag, User, Menu } from "lucide-react";
 import { useStore } from "@/components/store/store-provider";
-import { NAV_MENUS, CATEGORY_SLUGS } from "@/lib/data/catalog";
-
-function categoryHref(label: string): string {
-  const slug = label.toLowerCase();
-  return CATEGORY_SLUGS.includes(slug as (typeof CATEGORY_SLUGS)[number]) ? `/shop?category=${slug}` : "/shop";
-}
+import { NAV_MENUS } from "@/lib/data/catalog";
 
 export function Header() {
   const { cart, user, setCartOpen, setMobileNavOpen, setSearchOpen, wishlist } = useStore();
@@ -139,4 +134,3 @@ export function Header() {
   );
 }
 
-export { categoryHref };

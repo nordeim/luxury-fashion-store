@@ -572,3 +572,27 @@ Stage Summary:
 - No product-code changes required: codebase was already gate-green; session 2 closed operational (F-1 stale-inode recipe), documentation (F-2 SKILL.md, F-3 remediation plan) and alignment (F-4) gaps
 - Mobile nav Tailwind-v4 pin re-proven by direct geometry measurement (20px flex gaps, w-80 panel)
 - Deliverables: docs/remediation-plan-session2.md + luxury-fashion-store_SKILL.md + README/CLAUDE pointers, committed to main and pushed via SSH wrapper v3
+
+---
+Task ID: session-3
+Agent: main (Super Z)
+Task: Fresh-clone re-validation, full 12-category code audit (skills: code-review-checklist, security-and-hardening, code-quality-standards), TDD remediation of verified findings, browser parity/mobile-nav sweep, screenshots, docs alignment, commit + push
+
+Work Log:
+- Fresh clone at 8972c6d (docs-only deltas over session-2 code); npm install + .env from .env.example + db:setup (4/12/2/4); Playwright chromium binaries installed (fresh sandbox)
+- Starting gates all green: typecheck ✓ lint ✓ 52/52 unit ✓ build ✓ 64/64 E2E ✓
+- Audit (Explore agent broad scan + main-agent verification of every 🔴/🟡): F-1..F-20 across P0 security (order-token public-secret fallback with no prod guard), P1 correctness (checkout double-submit window, P2002 races, session survival after password change, spoofable XFF, missing CSP, unguarded JSON.parse ×3, un-clearable carrier/tracking, uncapped card inputs, stale wishlist Set), P2 hygiene (8 dead ui primitives, dead code, unbounded findMany, missing FK indexes)
+- Remediation plan written to docs/remediation-plan-session3.md BEFORE execution; every finding re-verified in code first
+- TDD: failing tests first (order-token prod guard, TRUST_PROXY gate, card caps, parseShippingAddress), then lib fixes (F-1/F-6/F-8/F-10 + src/instrumentation.ts boot guard), action-layer integrity (F-3/F-13/F-14 transactions + P2002 retry) and security (F-4 session revoke, F-9 has()-based clearing, F-16 actor column), components (F-2 isPending, F-5 demo-creds gate, F-11 functional wishlist setter, F-12 guarded search + surfaced address errors), schema migration (actor + 4 FK @@index, additive db push, seed updated), F-7 headers (env-conditional CSP/Permissions-Policy/COOP), F-15 TZ pin, F-17/F-18/F-19 hygiene
+- Gates post-remediation: typecheck ✓ lint ✓ 64/64 unit ✓ build ✓ E2E 64 passed ✓
+- Browser sweep: dev-conditional CSP validated (0 console violations after fix); headers curl-verified; **mobile nav re-measured @390×844: panel 320px flush-left, links 256px @x=32, gaps [20,20,20,20,29,20] — v4 flex gap-5 pin intact, identical to session-2 baseline**
+- F-21 REGRESSION caught in sweep: F-19 re-pointed the dashboard products query to the low-stock filter; Products KPI showed 0 not 12. Fixed TDD-style: red E2E value pin (toHaveText /12/) → db.product.count() in the Promise.all → green; rebuilt standalone first (stale-bundle trap — E2E validates the last build, logged as SKILL §9 #16 + §12 #9)
+- Screenshots refreshed post-fix (9): home-desktop, shop-plp, pdp, cart, login, account (new), admin-dashboard (new), mobile-home, mobile-menu-open → docs/screenshots/
+- Docs aligned same-commit: SKILL.md (§2 counts 64/62, §3 TRUST_PROXY env row, §9 #16–#17 traps, §10 rows, §11 checklist, §12 #9 lesson, §20 address.ts/actor/interfaces, App B ledger→session3), README (badge + counts + e2e build-first note), CLAUDE.md (gate counts), PAD (headers block + instrumentation in server box, OrderEvent.actor, FK indexes, ui/ tabs-only, lib tree address.ts, test table 7 files/64 unit + 8 specs/62 runs, checkout.ts ~200)
+- Count discipline: E2E stays 62 executions + 2 setup (31 unique × 2); unit 52 → 64 (address.test.ts ×5 + updated pins); README/CLAUDE/PAD/SKILL all re-grepped for drift
+
+Stage Summary:
+- Codebase is now gate-green with a hardened seam layer: fail-fast prod env guard, HMAC secret from strict authSecret(), CSP/COOP/Permissions-Policy headers, proxy-aware rate limiting, transactional cart/wishlist/checkout integrity, schema-backed actor filtering, safe address parsing, bounded reads
+- Parity law held: zero restyling; mobile-nav geometry identical to reference baseline
+- F-21 lesson institutionalized: narrowing a query is a contract change — audit consumers, pin values not visibility
+- All session-3 artifacts (plan, screenshots, SKILL/README/CLAUDE/PAD updates, worklog) land in one main-branch commit pushed via SSH wrapper v3

@@ -5,6 +5,7 @@ import { ArrowLeft, Truck, Package } from "lucide-react";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { formatCents } from "@/lib/money";
+import { parseShippingAddress, type ShippingAddressView } from "@/lib/address";
 
 export const metadata: Metadata = { title: "Order Detail" };
 export const dynamic = "force-dynamic";
@@ -32,15 +33,12 @@ export default async function AccountOrderDetailPage({
   // Owner gate: customers see only their own orders (admins use /admin/orders).
   if (!order || order.userId !== user.id) notFound();
 
-  const address = JSON.parse(order.shippingAddress) as {
-    fullName: string;
-    street: string;
-    city: string;
-    state: string;
-    zip: string;
-    country: string;
-  };
-  const customerEvents = order.events.filter((e) => e.type !== "status_changed" || !e.note?.includes("admin@"));
+  // F-8 (session-3): safe parse — a corrupted address row must not 500 the page.
+  const address = parseShippingAddress(order.shippingAddress) as ShippingAddressView;
+  // F-16 (session-3): hide admin-authored events by the structured actor
+  // field — the old `note.includes("admin@")` heuristic leaked internal notes
+  // whenever the admin email changed.
+  const customerEvents = order.events.filter((e) => e.actor !== "admin");
 
   return (
     <div className="py-14 px-6 lg:px-10">
