@@ -70,7 +70,6 @@ export function ProductCard({ product, onQuickView }: ProductCardProps) {
     <div className="group relative">
       <div className="relative overflow-hidden bg-secondary aspect-[3/4] rounded-lg">
         <Link href={`/product/${product.slug}`} aria-label={product.name}>
-          { }
           <img
             src={product.images[0] ?? ""}
             alt={product.name}

@@ -1,14 +1,14 @@
 "use client";
 
-// Hero carousel — parity surface (re-measured live 2026-10-14, session 5):
+// Hero carousel — parity surface (re-measured live 2026-10-14, sessions 5–6):
 // section relative w-full h-[70vh] lg:h-[90vh] overflow-hidden bg-primary;
 // slides: bg-cover bg-center + bg-gradient-to-r from-black/60 via-black/20
-// to-transparent; content block `text-white max-w-lg text-left` inside a
+// to-transparent; content block `text-white max-w-lg` inside a
 // `flex items-center px-10 lg:px-20` layer whose justify flips PER SLIDE from
-// slide.align — slide 1 anchors LEFT (justify-start), slides 2–3 anchor RIGHT
-// (justify-end). All hero copy is left-aligned within the block; the
-// description has NO mx-auto (P-1: the centered-hero implementation predated
-// this measurement).
+// slide.align — slide 1 anchors LEFT (justify-start + text-left), slide 2
+// anchors RIGHT (justify-end + text-left), and slide 3 anchors CENTER
+// (P-8, session-6 re-measure: justify-center + text-center; the CTA centers
+// via text-align on the inline-block link).
 //
 // Transition (P-2): the reference PUSHES slides horizontally — each wrapper
 // sits at translateX((i - active) * 100%) with a 700ms ease; the active slide
@@ -27,6 +27,13 @@ const AUTO_ROTATE_MS = 6000;
 const JUSTIFY: Record<HeroSlideAlign, string> = {
   left: "justify-start",
   right: "justify-end",
+  center: "justify-center",
+};
+
+const COPY_ALIGN: Record<HeroSlideAlign, string> = {
+  left: "text-left",
+  right: "text-left",
+  center: "text-center",
 };
 
 type HeroSlideAlign = (typeof HERO_SLIDES)[number]["align"];
@@ -74,7 +81,7 @@ export function HeroCarousel() {
           />
           <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/20 to-transparent" />
           <div className={`absolute inset-0 flex items-center ${JUSTIFY[s.align]} px-10 lg:px-20`}>
-            <div className="text-white max-w-lg text-left" data-testid={`hero-content-${i}`}>
+            <div className={`text-white max-w-lg ${COPY_ALIGN[s.align]}`} data-testid={`hero-content-${i}`}>
               <div className="text-xs tracking-[0.4em] font-light mb-4 text-white/70 font-montserrat">{s.accent}</div>
               <h2 className="font-cormorant text-6xl lg:text-8xl font-light leading-none mb-2">{s.title}</h2>
               <h3 className="font-cormorant text-5xl lg:text-7xl font-light italic leading-none mb-6">{s.subtitle}</h3>

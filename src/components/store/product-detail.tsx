@@ -13,10 +13,17 @@ import { ProductCard } from "@/components/store/product-card";
 import { addToCartAction } from "@/lib/actions/cart";
 import { toggleWishlistAction } from "@/lib/actions/wishlist";
 import { formatCents } from "@/lib/money";
-import { estimateDelivery } from "@/lib/delivery";
 import type { ProductCardData } from "@/lib/products";
 
-export function ProductDetail({ product, related }: { product: ProductCardData; related: ProductCardData[] }) {
+export function ProductDetail({
+  product,
+  related,
+  deliveryLabel,
+}: {
+  product: ProductCardData;
+  related: ProductCardData[];
+  deliveryLabel: string;
+}) {
   const { setCart, setCartOpen, wishlist, setWishlist } = useStore();
   const [size, setSize] = useState(product.sizes[0] ?? "");
   const [qty, setQty] = useState(1);
@@ -24,7 +31,11 @@ export function ProductDetail({ product, related }: { product: ProductCardData; 
   const [isPending, startTransition] = useTransition();
   // H-6 (session-5): action failures used to vanish — surface them inline.
   const [actionError, setActionError] = useState<string | null>(null);
-  const delivery = estimateDelivery();
+  // H-37 (session-6): the delivery label is computed ONCE in the RSC page and
+  // passed down — the old `estimateDelivery()` call here ran on BOTH the
+  // server render and the client hydration from independent `new Date()`
+  // clocks, so a render straddling the UTC day boundary hydrated a different
+  // label (text mismatch). Single clock now.
   const onSale = product.compareAtPrice !== null && product.compareAtPrice > product.price;
   const wishlisted = wishlist.has(product.id);
 
@@ -85,13 +96,11 @@ export function ProductDetail({ product, related }: { product: ProductCardData; 
                   aria-pressed={imageIdx === i}
                   className={`w-16 h-20 overflow-hidden border transition-colors ${imageIdx === i ? "border-foreground" : "border-transparent opacity-70 hover:opacity-100"}`}
                 >
-                  { }
                   <img src={img} alt="" className="w-full h-full object-cover" />
                 </button>
               ))}
             </div>
             <div className="flex-1 bg-secondary aspect-[3/4] rounded-lg overflow-hidden">
-              { }
               <img src={product.images[imageIdx] ?? product.images[0]} alt={product.name} className="w-full h-full object-cover" />
             </div>
           </div>
@@ -220,7 +229,7 @@ export function ProductDetail({ product, related }: { product: ProductCardData; 
             <div className="border-t border-border divide-y divide-border text-xs font-montserrat text-muted-foreground">
               <div className="flex items-center gap-3 py-3">
                 <Truck size={15} strokeWidth={1.8} />
-                Complimentary shipping on orders over $500 — arrives {delivery.label}
+                Complimentary shipping on orders over $500 — arrives {deliveryLabel}
               </div>
               <div className="flex items-center gap-3 py-3">
                 <RotateCcw size={15} strokeWidth={1.8} />

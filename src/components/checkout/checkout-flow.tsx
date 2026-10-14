@@ -324,7 +324,6 @@ export function CheckoutFlow({
             <div className="flex flex-col gap-4 mb-6">
               {cart.lines.map((line) => (
                 <div key={line.itemId} className="flex gap-3">
-                  { }
                   <img src={line.image} alt="" className="w-14 h-16 object-cover rounded-sm bg-secondary" />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-montserrat font-medium truncate">{line.name}</p>

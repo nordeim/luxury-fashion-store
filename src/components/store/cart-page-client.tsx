@@ -76,9 +76,8 @@ export function CartPageClient() {
               )}
               <div className="divide-y divide-border border-y border-border">
                 {cart.lines.map((line) => (
-                  <div key={line.itemId} className="flex gap-6 py-6">
+                  <div key={line.itemId} className="flex gap-6 py-6" data-testid="cart-line">
                     <Link href={`/product/${line.slug}`} className="shrink-0">
-                      { }
                       <img src={line.image} alt={line.name} className="w-28 h-36 object-cover rounded-lg bg-secondary" />
                     </Link>
                     <div className="flex-1 min-w-0">

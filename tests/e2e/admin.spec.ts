@@ -36,6 +36,18 @@ test.describe("admin console (admin session)", () => {
     // full seeded catalog (12), not the low-stock-filtered count.
     const productsCard = page.getByText("Products", { exact: true }).locator("..");
     await expect(productsCard).toHaveText(/12/);
+    // H-28 (session-6): KPI floors — deterministic because global-setup
+    // restores the canonical 4 orders (H-25): Revenue ≥ $9,594.99 (285000 +
+    // 340000 + 314000 + 20499 cents) and Orders ≥ 4. Real checkouts from the
+    // other device project legitimately raise both, so these are floors, not
+    // absolutes — the exact cancellation SEMANTICS are pinned in the H-2
+    // injection test below (cancelled orders move Orders, never Revenue).
+    const revenueCard = page.getByText("Revenue", { exact: true }).locator("..");
+    const revenueValue = Number(((await revenueCard.textContent()) ?? "").replace(/[^0-9.]/g, ""));
+    expect(revenueValue).toBeGreaterThanOrEqual(9594.99);
+    const ordersCard = page.getByText("Orders", { exact: true }).locator("..");
+    const ordersKpi = Number((await ordersCard.textContent())?.replace(/\D+/g, "") ?? "0");
+    expect(ordersKpi).toBeGreaterThanOrEqual(4);
 
     await page.goto("/admin/orders");
     await expect(page.getByText(/ORD-\d{4}-\d{3}/).first()).toBeVisible();
@@ -87,12 +99,15 @@ test.describe("admin console (admin session)", () => {
   // take-capped list length. The seed leaves the DB far below the take(100)
   // cap — where `.length` and COUNT agree — so this test INJECTS enough rows
   // to force divergence (104 total, 100 visible) and pins the header value.
+  // Session 6, H-28: the injected rows are CANCELLED orders — the test also
+  // pins the Revenue semantics (cancelled moves the Orders KPI by exactly
+  // 104 while Revenue stays bit-identical).
   test("orders header reports the true total past the take cap (H-2)", async ({ page }) => {
     const e2eDb = path.resolve(process.cwd(), "db", "e2e.db");
     const schema = path.resolve(process.cwd(), "prisma", "schema.prisma");
     const inject = Array.from({ length: 104 }, (_, i) => {
       const n = String(i + 1).padStart(3, "0");
-      return `INSERT INTO "Order" ("id","number","email","status","subtotal","shipping","total","shippingAddress","paymentMethod","placedAt","updatedAt") VALUES ('h2test${n}','ORD-9999-${n}','h2test@example.com','processing',100,0,100,'{}','cod',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);`;
+      return `INSERT INTO "Order" ("id","number","email","status","subtotal","shipping","total","shippingAddress","paymentMethod","placedAt","updatedAt") VALUES ('h2test${n}','ORD-9999-${n}','h2test@example.com','cancelled',100,0,100,'{}','cod',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);`;
     }).join("\n");
     const sqlFile = path.resolve(process.cwd(), "tests", "e2e", ".h2-inject.sql");
     writeFileSync(sqlFile, inject);
@@ -109,6 +124,15 @@ test.describe("admin console (admin session)", () => {
     await expect(page).toHaveURL(/\/account/);
 
     try {
+      // H-28 semantic pin: read both KPIs before the injection…
+      const kpis = async () => {
+        await page.goto("/admin");
+        const revenue = await page.getByText("Revenue", { exact: true }).locator("..").textContent();
+        const orderCount = await page.getByText("Orders", { exact: true }).locator("..").textContent();
+        return { revenue: revenue?.trim() ?? "", orderCount: Number(orderCount?.replace(/\D+/g, "") ?? "0") };
+      };
+      const before = await kpis();
+
       execSync(`npx prisma db execute --schema ${schema} --file ${sqlFile}`, { env, stdio: "pipe" });
       await page.goto("/admin/orders");
       // take(100) caps the visible rows at 100; the header must read the
@@ -118,6 +142,12 @@ test.describe("admin console (admin session)", () => {
       const visible = await page.getByRole("link", { name: /ORD-\d{4}-\d{3}/ }).count();
       expect(visible).toBe(100);
       expect(Number.parseInt(total?.replace(/\D+/g, "") ?? "0", 10)).toBeGreaterThan(visible);
+
+      // …and after: Orders grew by exactly the 104 cancelled rows while
+      // Revenue did not move a cent (cancelled ≠ revenue, H-28).
+      const during = await kpis();
+      expect(during.orderCount - before.orderCount).toBe(104);
+      expect(during.revenue).toBe(before.revenue);
     } finally {
       cleanup();
     }

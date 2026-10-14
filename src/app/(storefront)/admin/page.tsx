@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
-import { isAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatCents } from "@/lib/money";
 
@@ -12,11 +11,14 @@ export const dynamic = "force-dynamic";
 // Admin dashboard — role-gated (re-checked server-side on every request).
 
 export default async function AdminPage() {
+  // H-34 (session-6): a single getCurrentUser() — the isAdmin() helper used
+  // to re-fetch the session + user for a role check the loaded user already
+  // answers.
   const user = await getCurrentUser();
   if (!user) redirect("/login?redirect=/admin");
-  if (!(await isAdmin())) redirect("/account");
+  if (user.role !== "admin") redirect("/account");
 
-  const [orders, lowStockCount, lowStock, productCount, revenueAgg] = await Promise.all([
+  const [orders, lowStockCount, lowStock, productCount, revenueAgg, orderCount] = await Promise.all([
     db.order.findMany({ orderBy: { placedAt: "desc" }, take: 8 }),
     // G-3 (session-4): the KPI reads a dedicated COUNT — the list below is
     // take-capped (20), so lowStock.length would silently under-count once
@@ -28,7 +30,15 @@ export default async function AdminPage() {
       take: 20,
     }),
     db.product.count(),
-    db.order.aggregate({ _sum: { total: true }, _count: true }),
+    // H-28 (session-6): Revenue excludes cancelled orders — a refund isn't
+    // revenue. The Orders KPI intentionally stays "all orders placed", so it
+    // reads its own unfiltered count (the aggregate's where would filter it).
+    db.order.aggregate({
+      _sum: { total: true },
+      _count: true,
+      where: { status: { not: "cancelled" } },
+    }),
+    db.order.count(),
   ]);
 
   return (
@@ -44,7 +54,7 @@ export default async function AdminPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-12">
           {[
             { label: "Revenue", value: formatCents(revenueAgg._sum.total ?? 0) },
-            { label: "Orders", value: String(revenueAgg._count) },
+            { label: "Orders", value: String(orderCount) },
             { label: "Products", value: String(productCount) },
             { label: "Low Stock", value: String(lowStockCount) },
           ].map((stat) => (

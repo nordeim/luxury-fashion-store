@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { toProductCardData } from "@/lib/products";
+import { estimateDelivery } from "@/lib/delivery";
 import { ProductDetail } from "@/components/store/product-detail";
 
 // PDP — functional superset (reference /product/* 404s). Same design
@@ -43,6 +44,10 @@ export default async function ProductPage({ params }: ProductPageProps) {
     <ProductDetail
       product={toProductCardData(product)}
       related={related.map(toProductCardData)}
+      // H-37 (session-6): single clock — the label is computed here (server)
+      // and passed down, instead of each render environment calling
+      // estimateDelivery() with its own `new Date()`.
+      deliveryLabel={estimateDelivery().label}
     />
   );
 }

@@ -5,7 +5,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getCurrentUser, hashPassword, verifyPassword, currentSessionToken } from "@/lib/auth";
-import { addressSchema, passwordSchema } from "@/lib/validation";
+import { addressSchema, passwordSchema, profileSchema } from "@/lib/validation";
 import { fail, fieldErrorsFrom, ok, type ActionResult } from "@/lib/action-result";
 
 export async function updateProfileAction(
@@ -15,11 +15,13 @@ export async function updateProfileAction(
   const user = await getCurrentUser();
   if (!user) return fail("Sign in to update your profile.");
 
-  const name = String(formData.get("name") ?? "").trim();
-  if (name.length < 1 || name.length > 80) {
-    return fail("Check the highlighted fields", { name: "Enter your full name" });
+  // H-33 (session-6): the seam parses through the governed profileSchema —
+  // the hand-rolled length check was the last non-Zod mutation path.
+  const parsed = profileSchema.safeParse({ name: formData.get("name") ?? "" });
+  if (!parsed.success) {
+    return fail("Check the highlighted fields", fieldErrorsFrom(parsed.error));
   }
-  const updated = await db.user.update({ where: { id: user.id }, data: { name } });
+  const updated = await db.user.update({ where: { id: user.id }, data: { name: parsed.data.name } });
   revalidatePath("/account");
   return ok({ name: updated.name, email: updated.email });
 }
@@ -89,9 +91,14 @@ export async function saveAddressAction(
     if (!existing || existing.userId !== user.id) return fail("That address no longer exists.");
     await db.address.update({ where: { id: existingId }, data: parsed.data });
   } else {
-    const count = await db.address.count({ where: { userId: user.id } });
-    await db.address.create({
-      data: { ...parsed.data, userId: user.id, isDefault: count === 0 },
+    // H-31 (session-6): the default decision + insert share one transaction —
+    // two concurrent first-address creates could both see count 0 and mint
+    // two defaults.
+    await db.$transaction(async (tx) => {
+      const count = await tx.address.count({ where: { userId: user.id } });
+      await tx.address.create({
+        data: { ...parsed.data, userId: user.id, isDefault: count === 0 },
+      });
     });
   }
   revalidatePath("/account");

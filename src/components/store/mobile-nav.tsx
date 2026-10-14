@@ -16,14 +16,18 @@
 
 import Link from "next/link";
 import { X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useStore } from "@/components/store/store-provider";
+import { installFocusTrap } from "@/lib/focus-trap";
 import { NAV_MENUS } from "@/lib/data/catalog";
 
 export function MobileNav() {
   const { mobileNavOpen, setMobileNavOpen } = useStore();
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // Escape closes; body scroll locks while open (matches a modal drawer).
+  // H-26 (session-6): focus moves into the panel, Tab is trapped inside it,
+  // and the opener regains focus on close.
   useEffect(() => {
     if (!mobileNavOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -31,9 +35,11 @@ export function MobileNav() {
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
+    const trap = panelRef.current ? installFocusTrap(panelRef.current) : null;
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
+      trap?.();
     };
   }, [mobileNavOpen, setMobileNavOpen]);
 
@@ -49,6 +55,7 @@ export function MobileNav() {
       />
       {/* Panel — flex gap-6, NOT space-y (v4 trap pin #5). */}
       <div
+        ref={panelRef}
         className="fixed left-0 top-0 h-full w-80 bg-background z-50 p-8 flex flex-col gap-6"
         role="dialog"
         aria-modal="true"

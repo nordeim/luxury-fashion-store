@@ -20,6 +20,13 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
+// H-33 (session-6): the profile seam's governed schema — updateProfileAction
+// was the sole mutation seam hand-rolling its field rules (the H-19 drift
+// class). Same policy the form always enforced: 1–80 chars after trim.
+export const profileSchema = z.object({
+  name: z.string().trim().min(1, "Enter your full name").max(80, "Enter your full name"),
+});
+
 export const registerSchema = z
   .object({
     email: emailSchema,

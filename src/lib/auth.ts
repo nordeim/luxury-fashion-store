@@ -135,8 +135,3 @@ export async function getCurrentUser(): Promise<SafeUser | null> {
   }
   return toSafeUser(session.user);
 }
-
-export async function isAdmin(): Promise<boolean> {
-  const user = await getCurrentUser();
-  return user?.role === "admin";
-}

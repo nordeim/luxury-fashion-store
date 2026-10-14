@@ -142,7 +142,6 @@ export function SearchOverlay() {
                   }}
                   className="flex items-center gap-4 py-3 text-left hover:bg-secondary/50 transition-colors px-2 -mx-2"
                 >
-                  { }
                   <img src={hit.image} alt="" className="w-12 h-14 object-cover rounded-sm bg-secondary" />
                   <div className="flex-1 min-w-0">
                     <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{hit.brand}</p>

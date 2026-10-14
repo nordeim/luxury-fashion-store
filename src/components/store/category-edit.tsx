@@ -26,7 +26,6 @@ export function CategoryEdit() {
               href={`/shop?category=${card.id}`}
               className="group relative overflow-hidden aspect-[3/4] block"
             >
-              { }
               <img
                 src={card.image}
                 alt={card.label}

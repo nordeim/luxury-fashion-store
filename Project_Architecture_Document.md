@@ -125,7 +125,7 @@ How to use this document: new engineers read §2–§4 for the mental model; deb
 │  │   'unsafe-eval'), Permissions-Policy, COOP, Referrer-Policy, nosniff,   │
 │  │   HSTS, X-Frame-Options: DENY                                           │
 │  ├─ src/instrumentation.ts ← boot-time env guard (AUTH_SECRET mandatory    │
-│  │   in production)                                                        │
+│  │   in production) + sweeper schedule (expired sessions, idle guest carts)│
 │  └─ src/lib/actions/*  ← THE mutation seam (Zod + authz + rate limits + transactions)                      │
 └───────────────┬────────────────────────────────────────────────────────────────────────────────────────────┘
                 │ Prisma 6.19 (datasource URL re-anchored via src/lib/db-path.ts)
@@ -174,7 +174,7 @@ luxury-fashion-store/
 │   └── legacy-homenest/        ← archived Vite-SPA lineage (sessions, remediation history)
 ├── tests/e2e/                  ← Playwright: 9 spec files + global-setup (seed + transient wipe) + auth.setup
 └── src/
-    ├── instrumentation.ts      ← boot-time env guard (production fails fast without AUTH_SECRET)
+    ├── instrumentation.ts      ← boot-time env guard (production fails fast without AUTH_SECRET) + transient-state sweeper schedule (K-1)
     ├── app/
     │   ├── layout.tsx          ← minimal root shell (fonts, metadata)
     │   ├── globals.css         ← Tailwind v4 @theme (hsl literals), @font-face, v4 trap pins
@@ -198,7 +198,7 @@ luxury-fashion-store/
     └── lib/
         ├── db.ts / db-path.ts  ← Prisma singleton + URL re-anchoring (ADR-002)
         ├── cart.ts / cart-dto.ts ← server cart domain / pure DTO contract (ADR split)
-        ├── auth.ts             ← scrypt, sessions, SafeUser, isAdmin, strict authSecret()
+        ├── auth.ts             ← scrypt, sessions, SafeUser, strict authSecret()
         ├── actions/            ← auth, cart, wishlist, checkout, account, admin ("use server")
         ├── action-result.ts    ← { ok, data | error{message, fieldErrors} } envelope
         ├── validation.ts       ← Zod schemas + validateRedirectPath + isLuhnValid
@@ -206,8 +206,10 @@ luxury-fashion-store/
         ├── order-token.ts      ← HMAC guest order-view capability tokens (authSecret()-backed)
         ├── address.ts          ← schema-checked shipping-address parser (no raw JSON.parse)
         ├── image.ts            ← hardened catalog-image extraction (single firstImage contract)
-        ├── prisma-errors.ts    ← isUniqueViolation (P2002) detector for retry loops
+        ├── prisma-errors.ts    ← isUniqueViolation (P2002) / isRecordNotFound (P2025) detectors
         ├── search-params.ts    ← firstParam(): repeated query keys arrive as string[] (H-1)
+        ├── focus-trap.ts       ← installFocusTrap: focus contract for hand-rolled dialogs (H-26)
+        ├── sweeper.ts          ← expired-session / idle-guest-cart sweep plan + executor (K-1)
         ├── money.ts / delivery.ts / products.ts
         └── data/catalog.ts     ← reference-extracted catalog, slides, menus, demo users
 ```
@@ -380,7 +382,7 @@ Hero crossfade `transition-opacity duration-700`, auto-rotate 5000ms; drawers/ov
 ### 6.2 Authentication & Authorization
 
 - **Login:** scrypt verify → create `Session` row → signed httpOnly cookie (`aurelia_session`) → merge guest cart/wishlist (quantity-max union) → `redirect` validated path.
-- **Authorization:** `getCurrentUser()` re-hydrates from the session row per request; admin pages additionally call `isAdmin()` server-side on every request (role never trusted from the client).
+- **Authorization:** `getCurrentUser()` re-hydrates from the session row per request; admin pages check `user.role !== "admin"` on that loaded user server-side (role never trusted from the client; H-34 removed the duplicate re-fetch).
 - **Ownership checks:** cart/wishlist/admin actions verify row ownership (guest rows via cookie token, user rows via userId).
 
 ### 6.3 Threat Model (top vectors)
@@ -401,23 +403,23 @@ Hero crossfade `transition-opacity duration-700`, auto-rotate 5000ms; drawers/ov
 
 | Category | Files | Tests | Location | Framework |
 |---|---|---|---|---|
-| Unit (pure seams) | 10 | 77 | `src/lib/*.test.ts` | Vitest (node) |
+| Unit (pure seams) | 11 | 82 | `src/lib/*.test.ts` | Vitest (node) |
 | E2E setup | 1 | 1×2 projects | `tests/e2e/auth.setup.ts` | Playwright |
-| E2E functional | 9 | 45 cases × 2 profiles (91 passed + 1 desktop-only skip on mobile) | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
+| E2E functional | 9 | 50 cases × 2 profiles (100 passed + 2 desktop-only skips on mobile) | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
 
-E2E coverage map: home (hero **per-slide anchoring + push transition + brand marquee (P-1..P-3 pins)**/sections/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related) · cart+checkout (drawer steppers, empty state, totals, COD end-to-end, **card path incl. visible field errors (H-5)**, **guest→user cart merge at login (H-21 pin)**) · auth (login card, wrong-password alert, register validation, **register happy path (H-8)**, logout) · **account addresses (add/edit-prefill/update/set-default/delete — the H-4 remount pin)** · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px, stacking, navigation, Escape/backdrop close)** · admin (role gate + console pages + real mutation flows: order status/carrier set/clear; **orders take-cap COUNT pin (H-2, injects 104 rows)**; **product stock → storefront sellout path (H-7/H-15)**; **visibility toggle → /shop (H-7)**).
+E2E coverage map: home (hero **per-slide anchoring incl. slide-3 center (P-8) + push transition + brand marquee (P-1..P-3 pins)**/sections/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related) · cart+checkout (drawer steppers, empty state, totals, **double-remove races emit no 5xx (H-23)**, **drawer focus trap (H-26)**, COD end-to-end, **card path incl. visible field errors (H-5)**, **guest→user cart merge at login (H-21 pin, cleans up after itself)**) · auth (login card, wrong-password alert, register validation, **register happy path (H-8)**, logout) · **account addresses (add/edit-prefill/update/set-default/delete — the H-4 remount pin)** · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px, stacking, navigation, Escape/backdrop close, focus trap — H-26)** · admin (role gate + console pages + **dashboard KPI floors + Revenue-excludes-cancelled semantics (H-28)**; real mutation flows: order status/carrier set/clear; **orders take-cap COUNT pin (H-2, injects 104 cancelled rows)**; **product stock → storefront sellout path (H-7/H-15)**; **visibility toggle → /shop (H-7)**).
 
 ### 7.2 Test Patterns
 
 - **Unit = pure seams only** (money math, URL resolution, schemas, limiter, HMAC, delivery) — no DB, no DOM.
 - **E2E = the real artifact:** production standalone boots on :3100 against `db/e2e.db` (schema + seed via `global-setup.ts`); assertions target user-visible reality (roles, labels, `data-testid`, bounding boxes) — never implementation classes, except where a pin IS the contract (mobile nav tracking classes).
-- **Shared-DB discipline:** specs share one seeded DB and demo user → assertions use deltas, not absolute counts; specs tolerate guest mode (the COD spec fills the email field when rendered).
+- **Shared-DB discipline:** specs share one seeded DB and demo user → assertions use deltas or canonical floors, not absolute counts; the logout spec logs in on its own throwaway storage state (H-24) and mutating specs clean up after themselves — global-setup wipes ALL transient tables (incl. orders, H-25) and re-seeds, so every run starts canonical.
 
 ### 7.3 Pre-Deploy Checklist
 
 ```bash
-npm run verify      # typecheck → lint → 77 unit → production build (+ standalone assembly)
-npm run test:e2e    # 45 cases × 2 projects (+2 setup); requires the fresh build
+npm run verify      # typecheck → lint → 82 unit → production build (+ standalone assembly)
+npm run test:e2e    # 50 cases × 2 projects (+2 setup); requires the fresh build
 ```
 
 Both green = shippable. `npm run build` must re-run after ANY source change before E2E (the suite tests the built artifact, not dev).

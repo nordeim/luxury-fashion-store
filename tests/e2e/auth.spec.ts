@@ -53,9 +53,20 @@ test.describe("auth (logged out)", () => {
 });
 
 test.describe("logout (signed in)", () => {
-  // Inherits the setup project's storageState — no test.use override here.
+  // H-24 (session-6): this test used to run on the setup project's
+  // storageState — signing out destroyed that session's server row, so every
+  // later spec in the project silently ran as guest (order-dependence the
+  // file naming only happened to tolerate). The test now performs its OWN
+  // throwaway login on a logged-out context: the canonical per-project
+  // sessions survive the whole run. Rate budget: 5 logins/project/run < 10.
+  test.use(loggedOut);
+
   test("account page shows session data, then logout clears it", async ({ page }) => {
-    await page.goto("/account");
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("james@example.com");
+    await page.getByLabel("Password").fill("Demo1234!");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/account/, { timeout: 15_000 });
     await expect(page.getByRole("heading", { name: /My Account/i })).toBeVisible();
 
     // Profile form (Radix tab content mounts on activation).

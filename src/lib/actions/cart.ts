@@ -12,7 +12,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { getCartDto, getOrCreateCart, type CartDto } from "@/lib/cart";
 import { cartAddSchema, cartDeltaSchema } from "@/lib/validation";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
-import { isUniqueViolation } from "@/lib/prisma-errors";
+import { isRecordNotFound, isUniqueViolation } from "@/lib/prisma-errors";
 
 /**
  * Clamp for a requested quantity against available stock. 0 means the stock
@@ -123,15 +123,33 @@ export async function adjustCartItemAction(
     return fail("Invalid quantity change.");
   }
 
-  const nextQty = item.quantity + parsedDelta.data.delta;
-  if (nextQty <= 0) {
-    await db.cartItem.delete({ where: { id: item.id } });
-  } else if (item.product.stock <= 0) {
-    // H-15 (session-5): stock is gone — leave the line untouched (the checkout
-    // stock guard surfaces it) instead of writing the clamp's 0.
-  } else {
-    const clamped = clampToStock(nextQty, item.product.stock);
-    await db.cartItem.update({ where: { id: item.id }, data: { quantity: clamped } });
+  // H-23 (session-6): the write is an ATOMIC delta — `increment` cannot lose a
+  // concurrent ±1 (the module header's invariant, previously implemented as a
+  // read-modify-write that could). Post-corrections run after the atomic step:
+  // delete at ≤ 0, clamp above stock. Both the write and the corrections
+  // tolerate the line vanishing mid-flight (a concurrent remove/checkout won
+  // the race) — P2025 means the caller's desired end-state already holds, so
+  // the action re-syncs the bag and returns ok instead of throwing a raw 500.
+  try {
+    const updated = await db.cartItem.update({
+      where: { id: item.id },
+      data: { quantity: { increment: parsedDelta.data.delta } },
+      select: { quantity: true },
+    });
+    if (updated.quantity <= 0) {
+      await db.cartItem.delete({ where: { id: item.id } });
+    } else if (item.product.stock <= 0) {
+      // H-15 (session-5): stock is gone — leave the line untouched (the
+      // checkout stock guard surfaces it) instead of writing the clamp's 0.
+    } else if (updated.quantity > item.product.stock) {
+      await db.cartItem.update({ where: { id: item.id }, data: { quantity: item.product.stock } });
+    }
+  } catch (error) {
+    if (isRecordNotFound(error)) {
+      revalidatePath("/", "layout");
+      return ok(await getCartDto(user?.id ?? null));
+    }
+    throw error;
   }
 
   revalidatePath("/", "layout");
@@ -150,7 +168,18 @@ export async function removeCartItemAction(itemId: string): Promise<ActionResult
     const guestCart = await findCart(null);
     if (!guestCart || guestCart.id !== item.cartId) return fail("That bag line no longer exists.");
   }
-  await db.cartItem.delete({ where: { id: item.id } });
+  try {
+    await db.cartItem.delete({ where: { id: item.id } });
+  } catch (error) {
+    // H-23 (session-6): the line was removed concurrently (second click of a
+    // double-tap, checkout decrementing in parallel) — the desired end-state
+    // already holds; re-sync instead of a raw 500 + rejected transition.
+    if (isRecordNotFound(error)) {
+      revalidatePath("/", "layout");
+      return ok(await getCartDto(user?.id ?? null));
+    }
+    throw error;
+  }
   revalidatePath("/", "layout");
   const dto = await getCartDto(user?.id ?? null);
   return ok(dto);

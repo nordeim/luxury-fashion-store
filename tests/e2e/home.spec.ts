@@ -4,10 +4,14 @@
 //
 // Session-5 parity pins (P-1..P-6) were measured live on the reference
 // (pastel-aurelia, 2026-10-14): the hero anchors slides horizontally
-// (slide 1 left, slides 2–3 right) with left-aligned copy and a push
+// (slide 1 left, slide 2 right) with left-aligned copy and a push
 // transition; a brand marquee strip sits between hero and New Arrivals;
 // product-row cards are fixed 280px at desktop; The Edit + Styled by You
 // tiles are 3:4.
+//
+// Session-6 re-measure (P-8, same day, later capture): the reference
+// RE-ANCHORED slide 3 to the horizontal center with center-aligned copy
+// (slides 1–2 unchanged). Latest measurement wins — the pin below enforces it.
 import { expect, test } from "@playwright/test";
 
 test.describe("home", () => {
@@ -50,6 +54,27 @@ test.describe("home", () => {
         return layer ? getComputedStyle(layer).justifyContent : null;
       });
     expect(justify).toBe("flex-end");
+  });
+
+  test("hero slide 3 anchors CENTER with centered copy (P-8)", async ({ page }) => {
+    test.skip((page.viewportSize()?.width ?? 0) < 1024, "desktop-only pin");
+    await page.goto("/");
+    // Slides rotate every 6s; drive to slide 3 deterministically.
+    await page.getByRole("button", { name: "Next slide" }).click();
+    await page.getByRole("button", { name: "Next slide" }).click();
+    const slide = page.getByTestId("hero-slide-2");
+    await expect(slide).toHaveAttribute("data-active", "true");
+    const justify = await slide
+      .locator("div")
+      .evaluateAll((els) => {
+        const layer = els.find((e) => getComputedStyle(e).position === "absolute" && getComputedStyle(e).display === "flex");
+        return layer ? getComputedStyle(layer).justifyContent : null;
+      });
+    expect(justify).toBe("center");
+    const align = await page
+      .getByTestId("hero-content-2")
+      .evaluate((el) => getComputedStyle(el).textAlign);
+    expect(align).toBe("center");
   });
 
   test("hero pushes slides horizontally, not a fade (P-2)", async ({ page }) => {

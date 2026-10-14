@@ -67,7 +67,6 @@ export default async function AccountOrderDetailPage({
             <section className="border border-border divide-y divide-border">
               {order.items.map((item) => (
                 <div key={item.id} className="flex gap-4 p-5 items-center">
-                  { }
                   <img src={item.imageSnapshot ?? ""} alt="" className="w-16 h-20 object-cover rounded-sm bg-secondary" />
                   <div className="flex-1 min-w-0">
                     <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{item.brandSnapshot}</p>

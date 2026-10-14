@@ -89,4 +89,27 @@ test.describe("mobile navigation", () => {
     await page.mouse.click(370, 400);
     await expect(page.getByRole("dialog", { name: "Site menu" })).toBeHidden();
   });
+
+  test("opening the panel moves focus inside and traps Tab (H-26)", async ({ page }) => {
+    await page.getByRole("button", { name: "Open menu" }).click();
+    const panel = page.getByRole("dialog", { name: "Site menu" });
+    await expect(panel).toBeVisible();
+    // Initial focus moved INTO the panel (was: left on the opener).
+    const inside = await page.evaluate(
+      () => !!document.activeElement?.closest('[role="dialog"][aria-label="Site menu"]'),
+    );
+    expect(inside).toBe(true);
+    // Tab from the LAST link wraps back to the first — the page behind the
+    // drawer stays unreachable while the modal is open.
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-label="Site menu"]')!;
+      const items = Array.from(dialog.querySelectorAll<HTMLElement>("a[href], button:not([disabled])"));
+      items[items.length - 1].focus();
+    });
+    await page.keyboard.press("Tab");
+    const wrapped = await page.evaluate(
+      () => !!document.activeElement?.closest('[role="dialog"][aria-label="Site menu"]'),
+    );
+    expect(wrapped).toBe(true);
+  });
 });

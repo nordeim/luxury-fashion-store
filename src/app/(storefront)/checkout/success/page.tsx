@@ -78,7 +78,6 @@ export default async function CheckoutSuccessPage({ searchParams }: SuccessPageP
           <div className="py-6 border-b border-border flex flex-col gap-4">
             {order.items.map((item) => (
               <div key={item.id} className="flex gap-4 items-center">
-                { }
                 <img src={item.imageSnapshot ?? ""} alt="" className="w-16 h-20 object-cover rounded-sm bg-secondary" />
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{item.brandSnapshot}</p>

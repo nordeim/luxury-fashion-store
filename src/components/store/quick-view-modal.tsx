@@ -7,11 +7,12 @@
 
 import { X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTransition } from "react";
 import { useStore } from "@/components/store/store-provider";
 import { addToCartAction } from "@/lib/actions/cart";
 import { toggleWishlistAction } from "@/lib/actions/wishlist";
+import { installFocusTrap } from "@/lib/focus-trap";
 import { formatCents } from "@/lib/money";
 import type { ProductCardData } from "@/lib/products";
 
@@ -22,6 +23,7 @@ export function QuickViewModal({ product, onClose }: { product: ProductCardData 
   const [sizedForId, setSizedForId] = useState<string | null>(null);
   // H-6 (session-5): action failures surface here, not as silent no-ops.
   const [actionError, setActionError] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // Reset the size selection when a different product opens (adjust-during-render —
   // no effect needed; React re-renders immediately after this setState).
@@ -37,9 +39,13 @@ export function QuickViewModal({ product, onClose }: { product: ProductCardData 
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
+    // H-26 (session-6): modal focus contract — focus enters the panel, Tab
+    // stays inside it, the opener regains focus on close.
+    const trap = panelRef.current ? installFocusTrap(panelRef.current) : null;
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
+      trap?.();
     };
   }, [product, onClose]);
 
@@ -80,7 +86,7 @@ export function QuickViewModal({ product, onClose }: { product: ProductCardData 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={`Quick view ${product.name}`}>
+    <div ref={panelRef} className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={`Quick view ${product.name}`}>
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <div className="relative bg-card max-w-3xl w-full grid md:grid-cols-2 shadow-2xl">
         <button
@@ -92,7 +98,6 @@ export function QuickViewModal({ product, onClose }: { product: ProductCardData 
           <X size={20} strokeWidth={2} />
         </button>
         <div className="bg-secondary aspect-[3/4] md:aspect-auto md:h-full">
-          { }
           <img src={product.images[0] ?? ""} alt={product.name} className="w-full h-full object-cover" />
         </div>
         <div className="p-8 flex flex-col">

@@ -10,9 +10,10 @@
 
 import { X, ShoppingBag, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useStore } from "@/components/store/store-provider";
 import { adjustCartItemAction, removeCartItemAction } from "@/lib/actions/cart";
+import { installFocusTrap } from "@/lib/focus-trap";
 import { formatCents } from "@/lib/money";
 
 export function CartDrawer() {
@@ -21,6 +22,7 @@ export function CartDrawer() {
   // H-6 (session-5): mutation failures (vanished line, ownership) surface
   // here instead of leaving stale UI silently in place.
   const [actionError, setActionError] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!cartOpen) return;
@@ -29,9 +31,13 @@ export function CartDrawer() {
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
+    // H-26 (session-6): the drawer is a hand-rolled dialog — move focus into
+    // the panel, trap Tab inside it, restore focus to the opener on close.
+    const trap = panelRef.current ? installFocusTrap(panelRef.current) : null;
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
+      trap?.();
     };
   }, [cartOpen, setCartOpen]);
 
@@ -69,6 +75,7 @@ export function CartDrawer() {
         aria-hidden="true"
       />
       <div
+        ref={panelRef}
         className="fixed right-0 top-0 h-full w-full max-w-md bg-background z-50 flex flex-col"
         role="dialog"
         aria-modal="true"
@@ -120,7 +127,6 @@ export function CartDrawer() {
             cart.lines.map((line) => (
               <div key={line.itemId} className="flex gap-4">
                 <Link href={`/product/${line.slug}`} onClick={() => setCartOpen(false)} className="shrink-0">
-                  { }
                   <img src={line.image} alt={line.name} className="w-20 h-24 object-cover rounded-lg bg-secondary" />
                 </Link>
                 <div className="flex-1 min-w-0">

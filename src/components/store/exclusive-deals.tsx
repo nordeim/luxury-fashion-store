@@ -21,7 +21,6 @@ export function ExclusiveDeals() {
         <div className="grid lg:grid-cols-2 gap-6">
           {/* Featured deal */}
           <div className="relative overflow-hidden aspect-[4/3] lg:aspect-auto">
-            { }
             <img src={featured.image} alt="featured deal" className="w-full h-full object-cover" />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
             <div className="absolute bottom-8 left-8 text-white">
@@ -43,7 +42,6 @@ export function ExclusiveDeals() {
           <div className="grid grid-rows-2 gap-6">
             {SECONDARY_DEALS.map((deal) => (
               <div key={deal.kicker} className="relative overflow-hidden min-h-[220px]">
-                { }
                 <img src={deal.image} alt={`${deal.kicker} deal`} className="w-full h-full object-cover absolute inset-0" />
                 <div className="absolute inset-0 bg-gradient-to-r from-black/60 to-transparent" />
                 <div className="absolute inset-0 flex items-center px-8">

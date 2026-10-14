@@ -24,7 +24,6 @@ export function StyledByYou() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {UGC_CARDS.map((card) => (
             <div key={card.tag} className="group relative overflow-hidden aspect-[3/4] cursor-pointer">
-              { }
               <img
                 src={card.image}
                 alt={card.title}

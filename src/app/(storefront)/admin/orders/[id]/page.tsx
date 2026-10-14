@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatCents } from "@/lib/money";
 import { parseShippingAddress } from "@/lib/address";
@@ -19,7 +19,9 @@ export default async function AdminOrderDetailPage({
   const { id } = await params;
   const user = await getCurrentUser();
   if (!user) redirect("/login?redirect=/admin/orders");
-  if (!(await isAdmin())) redirect("/account");
+  // H-34 (session-6): role checked on the already-loaded user — isAdmin()
+  // re-fetched the session + user for a comparison it already had.
+  if (user.role !== "admin") redirect("/account");
 
   const order = await db.order.findUnique({
     where: { id },
@@ -52,7 +54,6 @@ export default async function AdminOrderDetailPage({
             <section className="border border-border divide-y divide-border">
               {order.items.map((item) => (
                 <div key={item.id} className="flex gap-4 p-5 items-center">
-                  { }
                   <img src={item.imageSnapshot ?? ""} alt="" className="w-14 h-18 object-cover rounded-sm bg-secondary" />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-montserrat font-medium">{item.nameSnapshot}</p>

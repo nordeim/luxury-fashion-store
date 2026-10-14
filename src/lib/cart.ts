@@ -212,13 +212,18 @@ export async function mergeGuestWishlistIntoUser(userId: string): Promise<void> 
     update: {},
     create: { userId, token: randomBytes(24).toString("hex") },
   });
-  for (const item of guestList.items) {
-    await db.wishlistItem.upsert({
-      where: { wishlistId_productId: { wishlistId: userList.id, productId: item.productId } },
-      update: {},
-      create: { wishlistId: userList.id, productId: item.productId },
-    });
-  }
+  // H-29 (session-6): the per-item upserts run in one transaction — the
+  // sibling cart merge already did; a mid-loop failure used to half-merge
+  // (recoverable only because the cookie survives, G-5, but inconsistent).
+  await db.$transaction(async (tx) => {
+    for (const item of guestList.items) {
+      await tx.wishlistItem.upsert({
+        where: { wishlistId_productId: { wishlistId: userList.id, productId: item.productId } },
+        update: {},
+        create: { wishlistId: userList.id, productId: item.productId },
+      });
+    }
+  });
   await db.wishlist.delete({ where: { id: guestList.id } }).catch(() => undefined);
   // G-5 (session-4): same cookie-after-work rule as the cart merge — the
   // cookie is the browser's only reference to the guest list, so it must

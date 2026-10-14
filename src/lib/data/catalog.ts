@@ -273,12 +273,12 @@ export interface HeroSlide {
   description: string;
   cta: string;
   image: string;
-  align: "left" | "right"; // P-1: live-measured 2026-10-14 — slides anchor left/right, never center
+  align: "left" | "right" | "center"; // P-1 (session 5) + P-8 (session 6): live-measured — slide 1 left, slide 2 right, slide 3 center (re-anchored by the reference mid-day 2026-10-14)
   accent: string;
 }
 
 // 3 hero slides (auto-rotating carousel on the reference home).
-export const HERO_SLIDES: HeroSlide[] = [{"id":1,"title":"The New","subtitle":"Autumn Collection","description":"Crafted for those who define their own elegance","cta":"Explore Collection","image":"https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=1600&q=90&fm=jpg&fit=crop","align":"left","accent":"WOMEN'S COLLECTION 2026"},{"id":2,"title":"Timeless","subtitle":"Tailoring","description":"Where heritage meets contemporary craft","cta":"Shop Men's","image":"https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?w=1600&q=90&fm=jpg&fit=crop","align":"right","accent":"MEN'S COLLECTION 2026"},{"id":3,"title":"Rare","subtitle":"Accessories","description":"Finishing touches that define the whole","cta":"Discover More","image":"https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1600&q=90&fm=jpg&fit=crop","align":"right","accent":"ACCESSORIES EDIT"}];
+export const HERO_SLIDES: HeroSlide[] = [{"id":1,"title":"The New","subtitle":"Autumn Collection","description":"Crafted for those who define their own elegance","cta":"Explore Collection","image":"https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=1600&q=90&fm=jpg&fit=crop","align":"left","accent":"WOMEN'S COLLECTION 2026"},{"id":2,"title":"Timeless","subtitle":"Tailoring","description":"Where heritage meets contemporary craft","cta":"Shop Men's","image":"https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?w=1600&q=90&fm=jpg&fit=crop","align":"right","accent":"MEN'S COLLECTION 2026"},{"id":3,"title":"Rare","subtitle":"Accessories","description":"Finishing touches that define the whole","cta":"Discover More","image":"https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1600&q=90&fm=jpg&fit=crop","align":"center","accent":"ACCESSORIES EDIT"}];
 
 // P-3 (session-5): the reference's brand marquee under the hero — 8 houses in
 // catalog-brand order, separated by gold ◆, doubled in the component for the

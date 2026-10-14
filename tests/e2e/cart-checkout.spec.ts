@@ -15,12 +15,18 @@ async function openDrawerWithItem(page: import("@playwright/test").Page) {
 }
 
 async function emptyTheBag(page: import("@playwright/test").Page) {
+  // H-27 (session-6): the old loop re-queried after a fixed 150ms sleep — a
+  // slow action roundtrip let it double-click the same line. Deterministic:
+  // wait for THAT row to detach before re-querying.
   await page.goto("/cart");
   for (;;) {
     const remove = page.getByRole("button", { name: /remove/i }).first();
     if (!(await remove.isVisible().catch(() => false))) break;
+    const lineCount = await page.getByTestId("cart-line").count();
     await remove.click();
-    await page.waitForTimeout(150); // server-action roundtrip per line
+    if (lineCount > 0) {
+      await expect(page.getByTestId("cart-line")).toHaveCount(lineCount - 1, { timeout: 10_000 });
+    }
   }
 }
 
@@ -33,6 +39,60 @@ test.describe("cart + checkout", () => {
     await expect(qty).toHaveText(String(before + 1));
     await page.getByTestId("cart-drawer").getByRole("button", { name: "Decrease quantity" }).click();
     await expect(qty).toHaveText(String(before));
+  });
+
+  test("rapid double-remove emits no 5xx and empties the bag (H-23)", async ({ page }) => {
+    await openDrawerWithItem(page);
+    const serverErrors: string[] = [];
+    page.on("response", (res) => {
+      if (res.status() >= 500) serverErrors.push(`${res.status()} ${res.url()}`);
+    });
+    await page.goto("/cart");
+    const remove = page.getByRole("button", { name: /remove/i }).first();
+    await expect(remove).toBeVisible();
+    // Two clicks inside one event burst: both actions' pre-checks see the line
+    // before either delete lands — the loser must re-sync (ok envelope), not
+    // throw P2025 as a raw 500.
+    await remove.dblclick();
+    await expect(page.getByText("Your bag is empty")).toBeVisible({ timeout: 10_000 });
+    expect(serverErrors).toEqual([]);
+  });
+
+  test("rapid double-remove on the cart page emits no 5xx (H-23)", async ({ page }) => {
+    await openDrawerWithItem(page);
+    const serverErrors: string[] = [];
+    page.on("response", (res) => {
+      if (res.status() >= 500) serverErrors.push(`${res.status()} ${res.url()}`);
+    });
+    await page.goto("/cart");
+    const remove = page.getByRole("button", { name: /remove/i }).first();
+    await expect(remove).toBeVisible();
+    // Second surface, same race: the Remove control is the one cart control
+    // NOT gated by isPending, so a double-fire reaches the action seam.
+    await remove.dblclick();
+    await expect(page.getByText("Your bag is empty")).toBeVisible({ timeout: 10_000 });
+    expect(serverErrors).toEqual([]);
+  });
+
+  test("opening the drawer moves focus inside and traps Tab (H-26)", async ({ page }) => {
+    await openDrawerWithItem(page);
+    const panel = page.getByRole("dialog", { name: "Shopping bag" });
+    await expect(panel).toBeVisible();
+    // Initial focus lives INSIDE the panel (was: left on the opener).
+    const inside = await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'));
+    expect(inside).toBe(true);
+    // Tab from the LAST focusable wraps to the first — the page behind stays
+    // unreachable while the modal is open.
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-label="Shopping bag"]')!;
+      const items = Array.from(dialog.querySelectorAll<HTMLElement>("a[href], button:not([disabled])"));
+      items[items.length - 1].focus();
+    });
+    await page.keyboard.press("Tab");
+    const wrapped = await page.evaluate(
+      () => !!document.activeElement?.closest('[role="dialog"][aria-label="Shopping bag"]'),
+    );
+    expect(wrapped).toBe(true);
   });
 
   test("empty bag shows the empty state with a way back", async ({ page }) => {
@@ -152,5 +212,13 @@ test.describe("guest cart merge at login", () => {
     // …and the merged bag is a real server row: a reload keeps it.
     await page.reload();
     await expect(page.getByText(/wide-brim|felt hat/i).first()).toBeVisible();
+
+    // H-24 companion (session-6): this test used to leave the merged line in
+    // james's user cart — once the logout spec stopped destroying the shared
+    // session (same fix), the next project's drawer specs saw two lines.
+    // Every run returns to the canonical empty-bag state, whatever the
+    // project order.
+    await emptyTheBag(page);
+    await expect(page.getByText("Your bag is empty")).toBeVisible();
   });
 });

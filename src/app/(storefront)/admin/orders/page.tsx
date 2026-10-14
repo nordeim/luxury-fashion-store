@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { firstParam } from "@/lib/search-params";
 import { AdminOrdersTable } from "@/components/account/admin-orders-table";
@@ -15,7 +15,9 @@ export default async function AdminOrdersPage({
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login?redirect=/admin/orders");
-  if (!(await isAdmin())) redirect("/account");
+  // H-34 (session-6): role checked on the already-loaded user — isAdmin()
+  // re-fetched the session + user for a comparison it already had.
+  if (user.role !== "admin") redirect("/account");
 
   // H-1 (session-5): repeated query keys (?status=a&status=b) arrive as
   // string[] at runtime — firstParam coerces before anything reaches Prisma.

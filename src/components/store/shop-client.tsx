@@ -36,12 +36,17 @@ export function ShopClient({ products, initial }: { products: ProductCardData[];
   const [price, setPrice] = useState(initial.price);
   const [sort, setSort] = useState<SortKey>((initial.sort as SortKey) || "featured");
   const [saleOnly, setSaleOnly] = useState(initial.sale);
+  // H-32 (session-6): the designers showcase is filter STATE like any other —
+  // it used to live only in `initial`, so any filter interaction rewrote the
+  // URL without it (a reload silently dropped the showcase) and the clear
+  // affordance couldn't reset it.
+  const [designers, setDesigners] = useState(initial.designers);
   const [quickView, setQuickView] = useState<ProductCardData | null>(null);
 
   const filtered = useMemo(() => {
     let list = products.slice();
     if (category) list = list.filter((p) => p.categorySlug === category);
-    if (initial.designers) list = list.filter((p) => p.brand.length > 0); // designer showcase (all seeded pieces are designer-made)
+    if (designers) list = list.filter((p) => p.brand.length > 0); // designer showcase (all seeded pieces are designer-made)
     if (saleOnly) list = list.filter((p) => p.compareAtPrice !== null);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -72,22 +77,23 @@ export function ShopClient({ products, initial }: { products: ProductCardData[];
         break; // featured = reference array order (server-sorted)
     }
     return list;
-  }, [products, category, search, price, sort, saleOnly, initial.designers]);
+  }, [products, category, search, price, sort, saleOnly, designers]);
 
   const syncUrl = (next: Partial<Filters>) => {
     const params = new URLSearchParams();
-    const merged = { category, search, price, sort, sale: saleOnly, ...next };
+    const merged = { category, search, price, sort, sale: saleOnly, designers, ...next };
     if (merged.category) params.set("category", merged.category);
     if (merged.search) params.set("search", merged.search);
     if (merged.price) params.set("price", merged.price);
     if (merged.sort && merged.sort !== "featured") params.set("sort", merged.sort);
     if (merged.sale) params.set("sale", "1");
+    if (merged.designers) params.set("designers", "1");
     const qs = params.toString();
     window.history.replaceState(null, "", qs ? `/shop?${qs}` : "/shop");
   };
 
   const activeFilters =
-    Boolean(category) || Boolean(search.trim()) || Boolean(price) || saleOnly;
+    Boolean(category) || Boolean(search.trim()) || Boolean(price) || saleOnly || designers;
 
   return (
     <div className="py-14 px-6 lg:px-10">
@@ -224,6 +230,7 @@ export function ShopClient({ products, initial }: { products: ProductCardData[];
                 setSearch("");
                 setPrice("");
                 setSaleOnly(false);
+                setDesigners(false);
                 window.history.replaceState(null, "", "/shop");
               }}
               className="text-xs tracking-wider uppercase font-montserrat text-muted-foreground hover:text-foreground underline underline-offset-4"

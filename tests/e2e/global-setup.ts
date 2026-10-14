@@ -35,7 +35,16 @@ export default function globalSetup() {
   // guest carts merged into the demo user made the next run's drawer specs
   // see two lines. Every run starts from the canonical catalog/user/order
   // state with empty bags, wishlists, and sessions.
+  // Session 6 (H-25): the wipe extends to ALL order rows — checkout specs
+  // mint ORD-2026-0XX orders every run (the seed only upserts 001–004), and
+  // the residue grew the shared DB unboundedly until the admin COUNT pin
+  // would have broken at 200. Orders/items/events are wiped wholesale and
+  // the (idempotent) seed re-runs to restore the 4 canonical orders, which
+  // also makes absolute dashboard KPI pins deterministic (H-28).
   const wipe = [
+    `DELETE FROM "OrderItem";`,
+    `DELETE FROM "OrderEvent";`,
+    `DELETE FROM "Order";`,
     `DELETE FROM "CartItem";`,
     `DELETE FROM "Cart";`,
     `DELETE FROM "WishlistItem";`,
@@ -43,9 +52,11 @@ export default function globalSetup() {
     `DELETE FROM "Session";`,
     `DELETE FROM "Address" WHERE "label" LIKE 'E2E%';`,
     `DELETE FROM "User" WHERE "email" LIKE 'e2e-%@example.com';`,
-    `DELETE FROM "Order" WHERE "number" LIKE 'ORD-9999-%';`,
   ].join("\n");
   const wipeFile = path.join(repoRoot, "db", ".e2e-wipe.sql");
   fs.writeFileSync(wipeFile, wipe);
   run("npx", ["prisma", "db", "execute", "--schema", "prisma/schema.prisma", "--file", "db/.e2e-wipe.sql"]);
+  // Re-seed AFTER the order wipe: canonical ORD-2026-001..004 come back,
+  // everything else stays wiped.
+  run("npx", ["tsx", "prisma/seed.ts"]);
 }
