@@ -548,3 +548,27 @@ Stage Summary:
 - Verification ledger: typecheck ✓ lint ✓ 52/52 unit ✓ build ✓ 64/64 E2E ✓
 - The repo is now the Next.js 16 AURELIA clone: visual parity (VELOUR chrome, measured tokens, w-80 flex-gap mobile nav) + functional superset (PLP/PDP/cart/guest+member checkout/accounts/wishlist/admin/API)
 - Binding contracts encoded in AGENTS.md/CLAUDE.md/PAD: schema-relative DATABASE_URL (+ absolute pass-through for standalone), assemble-standalone postbuild, per-project playwright auth, flex gap-5 (never space-y), hsl() literals in @theme
+
+---
+Task ID: session-2
+Agent: main (Super Z)
+Task: Resume from session-1 push — re-validate all gates, browser parity + mobile-nav sweep, close deliverable gaps (remediation plan doc, distilled SKILL.md, doc alignment), commit + push
+
+Work Log:
+- Pulled remote (8c675a7 → a0ded2c; adds docs/session_1.md); re-read AGENTS/CLAUDE/README/PAD + session_1 + worklog
+- Re-ran all six gates: typecheck ✓ lint ✓ 52/52 unit ✓ build ✓ 64/64 E2E ✓; verified doc counts match actual suites (31 unique E2E × 2 projects = 62 + 2 setup; 52 anchored it() calls)
+- skills/ excluded from all checks/tests/compilation (verified tooling paths never traverse it)
+- Browser parity sweep (agent-browser): desktop 1440×900 home matches recon captures (announcement bar, split nav, centered VELOUR, gold SALE, hero serif italic, 01/03 counter)
+- CRITICAL MOBILE-NAV VALIDATION @390×844: menu opens flush-left w-80 panel; link bounding boxes measured — exact 20px gaps (flex gap-5 = 1.25rem), 256px item width (w-80 − p-8), 29px divider gap before superset ACCOUNT/WISHLIST → Tailwind v4 pin intact, matches ref-mobile-menu-open.png
+- Functional sweep: add-to-bag → drawer (server-truth lines + badge), login james@example.com → /account, PLP WOMEN chip → ?category=women URL sync + filtered grid
+- BUG (ops, not product): dev server 500 "attempt to write a readonly database" (SQLite 1032) — stale process held pre-reseed inode of db/custom.db; production standalone unaffected (E2E green). Fix: restart + rm orphaned -journal/-wal/-shm; sandbox reaps plain backgrounds → double-fork (setsid &) keeps server alive; env -u DATABASE_URL mandatory
+- Wrote docs/remediation-plan-session2.md (findings F-1..F-4, executed ToDo ledger, verification, residual risks)
+- Created luxury-fashion-store_SKILL.md (root, v1.0.0, 569 lines) per skills/distill-codebase-skill + skills/to-distill-project-into-skill: 20 sections + 2 appendices, codebase-verified facts (tokens from globals.css, z-index census z-10×10/z-50×18, breakpoint census lg×97/sm×21/md×15, 13 Prisma models, ActionResult/CartDto/order-token interfaces, 15-entry trap log, symptom→fix debugging table, pre-ship checklist)
+- Doc alignment: README + CLAUDE.md now reference the SKILL.md; spot-checked all referenced paths exist; no TODO/FIXME artifacts
+- .env.example verified tracked (git ls-files); DATABASE_URL="file:../db/custom.db" pinned in both .env and .env.example
+- Final gates re-run post-changes: typecheck ✓ lint ✓ (docs-only deltas; no code changed this session)
+
+Stage Summary:
+- No product-code changes required: codebase was already gate-green; session 2 closed operational (F-1 stale-inode recipe), documentation (F-2 SKILL.md, F-3 remediation plan) and alignment (F-4) gaps
+- Mobile nav Tailwind-v4 pin re-proven by direct geometry measurement (20px flex gaps, w-80 panel)
+- Deliverables: docs/remediation-plan-session2.md + luxury-fashion-store_SKILL.md + README/CLAUDE pointers, committed to main and pushed via SSH wrapper v3

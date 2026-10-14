@@ -1,6 +1,9 @@
 # CLAUDE.md — AURELIA (VELOUR)
 
-Guidance for Claude Code working in this repository. Read alongside `AGENTS.md` (commands/env quick reference) and `Project_Architecture_Document.md` (deep architecture + ADRs).
+Guidance for Claude Code working in this repository. Read alongside `AGENTS.md`
+(commands/env quick reference), `Project_Architecture_Document.md` (deep architecture + ADRs), and
+`luxury-fashion-store_SKILL.md` (the distilled 20-section engineering skill: trap log, debugging
+guide, patterns, and quick reference card).
 
 ## Project Identity
 

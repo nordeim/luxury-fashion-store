@@ -47,7 +47,7 @@ Browser ── RSC pages (force-dynamic)
    └─ StoreProvider (single client seam; re-syncs from action DTOs)
 ```
 
-Deep dive: [`Project_Architecture_Document.md`](Project_Architecture_Document.md) · agent handbook: [`AGENTS.md`](AGENTS.md) · [`CLAUDE.md`](CLAUDE.md)
+Deep dive: [`Project_Architecture_Document.md`](Project_Architecture_Document.md) · agent handbook: [`AGENTS.md`](AGENTS.md) · [`CLAUDE.md`](CLAUDE.md) · distilled engineering skill: [`luxury-fashion-store_SKILL.md`](luxury-fashion-store_SKILL.md)
 
 ## Quick Start
 
@@ -107,7 +107,7 @@ PORT=3000 NODE_ENV=production AUTH_SECRET=<secret> DATABASE_URL="file:<absolute>
 | Transformation to Next.js 16 | ✅ | Vite SPA lineage archived in `docs/legacy-homenest/` |
 | Functional superset (PLP/PDP/cart/checkout/account/admin) | ✅ | All commerce paths live |
 | Test suites (vitest + playwright) | ✅ | 52 unit · 62 E2E + 2 setup, all green |
-| Docs (AGENTS/CLAUDE/README/PAD) | ✅ | This release |
+| Docs (AGENTS/CLAUDE/README/PAD + distilled SKILL.md) | ✅ | This release |
 
 ## License
 
