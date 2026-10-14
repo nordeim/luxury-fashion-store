@@ -7,14 +7,21 @@ import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { getOrCreateWishlist } from "@/lib/cart";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
+import { wishlistMutationSchema } from "@/lib/validation";
 
 export interface WishlistToggleResult {
   wishlisted: boolean;
 }
 
 export async function toggleWishlistAction(productId: string): Promise<ActionResult<WishlistToggleResult>> {
+  // H-53 (session-8): Zod at the seam — the schema existed unused and a
+  // malformed id reached Prisma unvalidated (raw PrismaClientValidationError
+  // 500 outside the try/catch). AGENTS.md rule 5: validate at every seam.
+  const parsed = wishlistMutationSchema.safeParse({ productId });
+  if (!parsed.success) return fail("Invalid wishlist request.");
+
   const user = await getCurrentUser();
-  const product = await db.product.findUnique({ where: { id: productId }, select: { id: true } });
+  const product = await db.product.findUnique({ where: { id: parsed.data.productId }, select: { id: true } });
   if (!product) return fail("This piece is no longer available.");
 
   const wishlistId = await getOrCreateWishlist(user?.id ?? null);
@@ -33,13 +40,13 @@ export async function toggleWishlistAction(productId: string): Promise<ActionRes
   try {
     const wishlisted = await db.$transaction(async (tx) => {
       const existing = await tx.wishlistItem.findUnique({
-        where: { wishlistId_productId: { wishlistId, productId } },
+        where: { wishlistId_productId: { wishlistId, productId: parsed.data.productId } },
       });
       if (existing) {
         await tx.wishlistItem.delete({ where: { id: existing.id } });
         return false;
       }
-      await tx.wishlistItem.create({ data: { wishlistId, productId } });
+      await tx.wishlistItem.create({ data: { wishlistId, productId: parsed.data.productId } });
       return true;
     });
     await touch;

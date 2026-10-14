@@ -11,6 +11,7 @@ import {
   orderStatusSchema,
   registerSchema,
   validateRedirectPath,
+  wishlistMutationSchema,
 } from "./validation";
 
 describe("loginSchema", () => {
@@ -62,6 +63,21 @@ describe("cartDeltaSchema", () => {
     expect(cartDeltaSchema.safeParse({ delta: 99 }).success).toBe(true);
     expect(cartDeltaSchema.safeParse({ delta: 100 }).success).toBe(false);
     expect(cartDeltaSchema.safeParse({ delta: 1.5 }).success).toBe(false);
+  });
+});
+
+describe("wishlistMutationSchema (H-53 — the toggle seam validates before Prisma)", () => {
+  it("accepts a non-empty product id", () => {
+    expect(wishlistMutationSchema.safeParse({ productId: "prod_1" }).success).toBe(true);
+  });
+
+  it("rejects an empty id (the schema is wired into toggleWishlistAction — H-53)", () => {
+    expect(wishlistMutationSchema.safeParse({ productId: "" }).success).toBe(false);
+  });
+
+  it("rejects non-string ids before any DB call", () => {
+    expect(wishlistMutationSchema.safeParse({ productId: 123 }).success).toBe(false);
+    expect(wishlistMutationSchema.safeParse({}).success).toBe(false);
   });
 });
 

@@ -1,7 +1,10 @@
 // Admin console — role gate (customer redirected), admin dashboard renders,
 // REAL admin mutations (order update, product stock/visibility).
-// The admin login happens in-spec with a logged-out session (a few extra auth
-// attempts are well under the 10/IP/15 min limiter budget).
+// ⚠️ H-52 (session-8) — the admin login budget is EXACTLY consumed: 5 admin
+// logins in this spec × 2 projects = 10/10 per IP+email (SKILL §9 #23). ONE
+// extra admin login anywhere in the suite 429s the last specs. Tests needing
+// an admin-side state change use the `prisma db execute` SQL fixture pattern
+// (H-2/H-39) — never a login. Failed attempts also consume the bucket.
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { writeFileSync } from "node:fs";
@@ -172,9 +175,9 @@ test.describe("admin console (admin session)", () => {
     const stockInput = page.getByLabel("Stock for Wide-Brim Felt Hat");
     const setBtn = stockInput.locator("..").getByRole("button", { name: "Set" });
 
-    // STALE PDP FIRST: rendered while stock is still 5 and kept open across
-    // the admin mutation (never reloaded) — a live React island whose server
-    // truth moves under it.
+    // STALE PDP FIRST: rendered while stock is still 12 (the seed value) and
+    // kept open across the admin mutation (never reloaded) — a live React
+    // island whose server truth moves under it.
     const stale = await page.context().newPage();
     await stale.goto("/product/wide-brim-felt-hat");
     const staleAdd = stale.locator("main").getByRole("button", { name: "Add to Bag" }).first();

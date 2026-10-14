@@ -40,18 +40,26 @@ export function ExclusiveDeals({
   return (
     <section className="py-20 bg-cream px-6 lg:px-10" data-testid="exclusive-deals">
       <div className="max-w-screen-xl mx-auto">
-        <div className="mb-10">
-          <div className="text-[10px] tracking-[0.4em] text-gold font-montserrat mb-3">LIMITED TIME OFFER</div>
-          <h2 className="font-cormorant text-5xl lg:text-6xl font-light">
-            Exclusive <span className="italic">Deals</span>
-          </h2>
-          <p className="text-sm font-montserrat text-muted-foreground mt-3">
-            Curated luxury at exceptional value. Each piece, a statement.
-          </p>
+        {/* P-14 (session-8, re-measured live): the header text and the
+            countdown share ONE row — `flex flex-col lg:flex-row items-start
+            lg:items-center justify-between mb-12 gap-6` — with the countdown
+            STACKED on the right (label above the boxes, right-aligned at lg,
+            72px) beside the 131px text block (kicker mb-2, h2 60px
+            font-light, 14px copy wrapping two lines inside the flex column).
+            The old stacked header (mb-10) + label-left countdown row was the
+            drift that made the section 28px tall. */}
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between mb-12 gap-6">
+          <div>
+            <div className="text-[10px] tracking-[0.4em] text-gold font-montserrat mb-2">LIMITED TIME OFFER</div>
+            <h2 className="font-cormorant text-5xl lg:text-6xl font-light">
+              Exclusive <span className="italic">Deals</span>
+            </h2>
+            <p className="text-sm font-montserrat text-muted-foreground mt-2 max-w-[320px]">
+              Curated luxury at exceptional value. Each piece, a statement.
+            </p>
+          </div>
+          <SaleCountdown />
         </div>
-
-        {/* P-9: the live countdown row — label left, digit boxes right. */}
-        <SaleCountdown />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-14">
           {/* Tall featured deal (women) — stretches to the right column's height. */}
@@ -73,12 +81,15 @@ export function ExclusiveDeals({
               {featured.discount}
             </div>
           </div>
-          {/* Two stacked deals (men, accessories) — 3:4 on mobile, left
+          {/* Two stacked deals (men, accessories) — 2:3 at EVERY breakpoint
+              (P-14 follow-up, re-measured 2026-10-15: the mobile tiles are
+              342×513 = natural 2:3, `aspect: auto` on the reference is the
+              image's own ratio; session-7's mobile 3:4 was the drift), left
               gradient, copy bottom-left on mobile / vertically centered on
               desktop (measured). */}
           <div className="grid grid-rows-2 gap-6">
             {SECONDARY_DEALS.map((deal) => (
-              <div key={deal.kicker} className="relative overflow-hidden aspect-[3/4] lg:aspect-[2/3]">
+              <div key={deal.kicker} className="relative overflow-hidden aspect-[2/3]">
                 <img src={deal.image} alt={`${deal.kicker} deal`} className="w-full h-full object-cover absolute inset-0" />
                 <div className="absolute inset-0 bg-gradient-to-r from-black/60 to-transparent" />
                 <div className="absolute inset-0 flex items-end lg:items-center px-8 pb-6 lg:pb-0">

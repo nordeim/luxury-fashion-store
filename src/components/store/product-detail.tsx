@@ -107,17 +107,30 @@ export function ProductDetail({
 
           {/* Buy panel */}
           <div>
-            {product.tag && (
-              <span className={`inline-block text-[10px] tracking-[0.2em] uppercase px-2.5 py-1 font-montserrat font-medium mb-4 ${product.tag === "SALE" ? "bg-red-600 text-white" : "bg-primary text-primary-foreground"}`}>
-                {product.tag}
+            {/* Session-8 hygiene: the PDP is a superset surface (the
+                reference has no PDP) but speaks the same card language —
+                sale products carry the -{discount}% red-500 chip (the old
+                red-600 "SALE" word and gold fill stars diverged from the
+                P-10 card stack one click away). */}
+            {product.tag === "SALE" && onSale ? (
+              <span className="inline-block bg-red-500 text-white text-[10px] font-montserrat font-medium px-2 py-0.5 mb-4">
+                -{product.discount}%
               </span>
+            ) : (
+              product.tag && (
+                <span className="inline-block text-[10px] tracking-[0.2em] uppercase px-2.5 py-1 font-montserrat font-medium mb-4 bg-primary text-primary-foreground">
+                  {product.tag}
+                </span>
+              )
             )}
             <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-2">{product.brand}</p>
             <h1 className="font-cormorant text-4xl lg:text-5xl font-light mb-4">{product.name}</h1>
             <div className="flex items-center gap-2 mb-5">
               <div className="flex items-center" aria-hidden="true">
+                {/* Card-language stars: 16px stroke glyphs in
+                    muted-foreground (P-10) — not the old gold fill. */}
                 {[1, 2, 3, 4, 5].map((i) => (
-                  <Star key={i} className={`w-3.5 h-3.5 ${i <= Math.round(product.rating) ? "fill-accent text-accent" : "text-border"}`} />
+                  <Star key={i} className="w-4 h-4 text-muted-foreground" strokeWidth={1.5} />
                 ))}
               </div>
               <span className="text-xs text-muted-foreground font-montserrat">
@@ -129,7 +142,7 @@ export function ProductDetail({
               {onSale && (
                 <>
                   <span className="text-base text-muted-foreground line-through">{formatCents(product.compareAtPrice ?? 0)}</span>
-                  <span className="bg-red-600 text-white text-[10px] tracking-widest uppercase px-2 py-0.5 font-montserrat font-bold">
+                  <span className="bg-red-500 text-white text-[10px] tracking-widest uppercase px-2 py-0.5 font-montserrat font-bold">
                     -{product.discount}%
                   </span>
                 </>

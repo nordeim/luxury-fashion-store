@@ -85,24 +85,14 @@ export function MobileNav() {
               </Link>
             </div>
           ))}
-          {/* Registered superset: the reference's mobile menu is inert; the
-              clone adds signed-in links below the fold-equivalent gap. */}
-          <div className="pt-2 border-t border-border flex flex-col gap-5">
-            <Link
-              href="/account"
-              className="block text-sm tracking-[0.2em] uppercase font-medium cursor-pointer hover:text-gold transition-colors"
-              onClick={() => setMobileNavOpen(false)}
-            >
-              Account
-            </Link>
-            <Link
-              href="/wishlist"
-              className="block text-sm tracking-[0.2em] uppercase font-medium cursor-pointer hover:text-gold transition-colors"
-              onClick={() => setMobileNavOpen(false)}
-            >
-              Wishlist
-            </Link>
-          </div>
+          {/* P-12 (session-8): the reference REMOVED its ACCOUNT/WISHLIST
+              tail (measured live — the panel is now the logotype + the five
+              inert menus, gaps [20,20,20,20]); the tail's 7-item geometry
+              [20,20,20,20,29,20] from session 6/7 no longer exists to pin.
+              Parity law wins: the tail is gone. Account/wishlist stay
+              reachable (header heart, /account, checkout) — superset URLs,
+              documented in the remediation plan. If the reference re-adds a
+              tail, restore ours and re-pin 7 items. */}
         </nav>
       </div>
     </div>

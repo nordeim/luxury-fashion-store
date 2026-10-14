@@ -4,12 +4,13 @@
 // Women's Collection / Sale Items / Men's Edit / Fine Accessories:
 // header row (kicker gold + h2 serif with italic accents + arrows + VIEW ALL)
 // + horizontal scroll row of FIXED-WIDTH product cards (re-measured live
-// 2026-10-14, P-4 session-5: the reference cards are `flex-shrink-0
-// w-[260px] lg:w-[280px]` in a `flex gap-6 overflow-x-auto hide-scrollbar
-// pb-4` row — 4.5 cards visible @1280; the old 25%-width fill measured 302px
-// and rendered every section 39px short). The reference paginates with
-// prev/next arrows; the clone scrolls with the same arrow chrome — same
-// visual, working behavior (snap kept as a functional superset).
+// 2026-10-15, P-4 session-5 + P-13 session-8: the reference cards are
+// `flex-shrink-0 w-[260px] lg:w-[280px]` — FIXED at every breakpoint, not
+// fractions — in a `flex gap-6 overflow-x-auto hide-scrollbar pb-4` row (24px
+// gap at ALL breakpoints; measured @390: 260px cards, 24px gap, 1.36 visible).
+// The reference paginates with prev/next arrows; the clone scrolls with the
+// same arrow chrome — same visual, working behavior (snap kept as a
+// functional superset).
 //
 // Tailwind v4 note: the scroll row uses flex + snap; the section header is a
 // plain flex row (no space-y pitfalls).
@@ -44,8 +45,7 @@ export function ProductRowSection({
   const scrollBy = (dir: 1 | -1) => {
     const el = scroller.current;
     if (!el) return;
-    // One card + gap at the current viewport (cards are 2-col mobile /
-    // 4-col desktop of the container width).
+    // One card + the measured 24px gap, two cards per step.
     const card = el.querySelector<HTMLElement>("[data-product-card]");
     const delta = card ? (card.offsetWidth + 24) * 2 : el.clientWidth / 2;
     el.scrollBy({ left: dir * delta, behavior: "smooth" });
@@ -56,7 +56,7 @@ export function ProductRowSection({
       <div className="max-w-screen-xl mx-auto">
         <div className="flex items-end justify-between mb-10">
           <div>
-            <div className="text-[10px] tracking-[0.4em] text-gold font-montserrat mb-3">{kicker}</div>
+            <div className="text-[10px] tracking-[0.4em] text-gold font-montserrat mb-2">{kicker}</div>
             <h2 className="font-cormorant text-4xl lg:text-5xl font-light">
               {title}
               {titleAccent && (
@@ -84,9 +84,12 @@ export function ProductRowSection({
             >
               <ChevronRight size={16} strokeWidth={2} />
             </button>
+            {/* P-13 (session-8): the reference hides "View All" below lg
+                (display:none measured @390) — the header stays one 63px
+                title+arrows row instead of wrapping. */}
             <Link
               href={viewAllHref}
-              className="ml-2 text-xs tracking-[0.3em] uppercase font-montserrat text-muted-foreground hover:text-foreground border-b border-transparent hover:border-foreground transition-all"
+              className="ml-2 hidden text-xs tracking-[0.3em] uppercase font-montserrat text-muted-foreground hover:text-foreground border-b border-transparent hover:border-foreground transition-all lg:inline-block"
             >
               View All
             </Link>
@@ -94,13 +97,13 @@ export function ProductRowSection({
         </div>
         <div
           ref={scroller}
-          className="flex gap-4 lg:gap-6 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex gap-6 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           data-testid="product-row"
         >
           {products.map((product) => (
             <div
               key={product.id}
-              className="w-[calc(50%-8px)] md:w-[calc(33.333%-16px)] lg:w-[280px] shrink-0 snap-start"
+              className="w-[260px] lg:w-[280px] shrink-0 snap-start"
             >
               <ProductCard product={product} onQuickView={onQuickView} />
             </div>

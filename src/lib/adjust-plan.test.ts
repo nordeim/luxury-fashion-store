@@ -14,8 +14,13 @@ describe("planAdjustment (H-39 — growth on a sold-out line is forbidden)", () 
     expect(planAdjustment(99, 0)).toEqual({ kind: "skip" });
   });
 
-  it("never skips a zero delta on a sold-out line (nothing to write)", () => {
+  it("skips a zero delta on a sold-out line (nothing to write)", () => {
     expect(planAdjustment(0, 0)).toEqual({ kind: "skip" });
+  });
+
+  it("skips a zero delta on ANY line (H-54 — a no-op must not UPDATE + touch + revalidate)", () => {
+    expect(planAdjustment(0, 5)).toEqual({ kind: "skip" });
+    expect(planAdjustment(0, 12)).toEqual({ kind: "skip" });
   });
 
   it("allows a decrement on a sold-out line (the user may still shed the line)", () => {

@@ -1,10 +1,10 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.2.0
+version: 1.3.0
 last_updated: 2026-10-15
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
-project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 98/98 unit (13 files) ✓ build ✓ E2E 111 passed + 3 skipped (57 unique cases × chromium+mobile, three desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
+project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 109/109 unit (14 files) ✓ build ✓ E2E 118 passed + 2 skipped (60 unique cases × chromium+mobile, two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
 reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only prototype (inert commerce buttons). This repo is its functional superset with resting-state visual parity."
 ---
 
@@ -14,7 +14,7 @@ reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only protot
 > against source at distillation time (v1.0.0). Companion docs: `AGENTS.md`
 > (commands/env quick reference), `CLAUDE.md` (working standards),
 > `Project_Architecture_Document.md` (deep architecture + ADRs),
-> `docs/remediation-plan-session7.md` (latest remediation ledger).
+> `docs/remediation-plan-session8.md` (latest remediation ledger).
 
 ---
 
@@ -50,18 +50,31 @@ typography. Functional additions may extend those surfaces, never restyle them.
   transition (translateX ±100%), never a cross-fade.
 - Brand marquee strip directly under the hero: border-y, 30s linear marquee,
   8 houses separated by gold ◆ (P-3).
-- Exclusive Deals is a COMPOSITE section (P-9, re-measured 2026-10-15):
-  left-aligned header ("LIMITED TIME OFFER" + copy), a live "SALE ENDS IN"
-  countdown (three 48px ink digit boxes; mount-relative ~8h24m target ticking
-  real seconds — the reference's own measured semantics), a bento grid (tall
-  628×1908 women tile stretching over two 628×942 men/accessories tiles), and
-  the sale products INLINE as a 4-col grid — the standalone Sale row is GONE.
+- Exclusive Deals is a COMPOSITE section (P-9, re-measured 2026-10-15;
+  P-14 session-8): the header text and the countdown share ONE row
+  (`flex flex-col lg:flex-row items-start lg:items-center justify-between
+  mb-12 gap-6`) — left: kicker mb-2 + 60px font-light h2 + copy
+  (`max-w-[320px]`, wraps two lines); right: the countdown STACK ("SALE
+  ENDS IN" label ABOVE three 48px ink digit boxes, `items-end` at lg;
+  mount-relative ~8h24m target ticking real seconds, re-armed per mount
+  cycle — H-49); a bento grid (tall 628×1908 women tile stretching over two
+  628×942 men/accessories tiles — the right tiles are **2:3 at EVERY
+  breakpoint**, mobile 342×513 included), and the sale products INLINE as a
+  4-col grid — the standalone Sale row is GONE.
+- The mobile drawer is the logotype + FIVE inert menus (Women, Men,
+  Accessories, Designers, Sale) with `flex flex-col gap-5 mt-4` — the
+  ACCOUNT/WISHLIST tail the reference shipped in sessions 1–7 was REMOVED by
+  the reference (P-12, re-measured 2026-10-15); the clone matches (account
+  stays reachable via the header heart/checkout/URLs).
 - Hover-revealed commerce: product card action row (ADD TO BAG / eye / heart)
   appears on hover; card text stack = brand / name / 16px stroke stars
   (muted-foreground, NOT gold) + "(89)" 10px / price + 14px compareAt /
-  COLOR SWATCHES (w-4 h-4 border chips; no "NEW" chip); sale cards carry a
-  -{discount}% red-500 chip on the image (P-10). Product rows use FIXED 280px
-  cards at desktop (not container-width fractions).
+  COLOR SWATCHES (w-4 h-4 border chips; no "NEW" chip) / **SIZE CHIPS** (one
+  bordered button per product size — text-[10px] px-2.5 py-1, square,
+  transparent bg; P-11). Sale cards carry a -{discount}% red-500 chip on the
+  image (P-10). Product rows use FIXED-width cards at every breakpoint
+  (260px below lg, 280px at lg+, gap-6 throughout — P-13; "View All" hides
+  below lg), and the row-header kicker sits mb-2 (8px).
 
 **Superset mission:** everything the reference fakes, this codebase really does —
 full catalog, cart, guest+member checkout (card + COD), wishlist, customer accounts,
@@ -77,8 +90,8 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | Styling | Tailwind CSS (CSS-first `@theme`) | 4.3.3 | v4 traps — see §9 #1–#2 |
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
-| Unit tests | Vitest (node env) | 3.2.7 | 98 tests in `src/lib/*.test.ts` (13 files) |
-| E2E | Playwright (standalone server) | 1.64.0 | 57 unique cases × 2 device projects (+2 setup) |
+| Unit tests | Vitest (node env) | 3.2.7 | 109 tests in `src/lib/*.test.ts` (14 files) |
+| E2E | Playwright (standalone server) | 1.64.0 | 60 unique cases × 2 device projects (+2 setup) |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -215,8 +228,11 @@ hand-rolled drawer/modals, H-26; document-level keydown since H-41),
 `sweeper.ts` (`buildSweepPlan` pure + `runSweep` executor — expired sessions /
 idle guest carts, K-1, wired in `src/instrumentation.ts` at boot + hourly),
 `adjust-plan.ts` (`planAdjustment`/`planCorrection` — the pure cart stepper
-decision seam, H-39/H-40), and `countdown.ts` (`formatCountdownParts` +
-`SALE_COUNTDOWN_MS` — the P-9 sale countdown seam).
+decision seam, H-39/H-40; zero-delta skip since H-54), `countdown.ts`
+(`formatCountdownParts` + `SALE_COUNTDOWN_MS` — the P-9 sale countdown seam),
+and `countdown-store.ts` (`createCountdownStore` — the H-49 store seam:
+per-mount-cycle deadline re-arm + per-tick snapshot cache, unit-pinnable with
+an injected clock).
 
 **Composition rules:** one `StoreProvider` (single client context: cart/user/wishlist
 + UI overlays); server truth flows in as props; client components import types from
@@ -380,7 +396,21 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
     429'd and failed with login bounces. Fix: tests needing an admin-side
     state change drive it via `prisma db execute` SQL (the H-2 injection
     pattern) on the canonical james session. Never add an admin login to the
-    suite.
+    suite. Failed attempts also consume the bucket.
+24. **`getComputedStyle().flexDirection` returns `"row"` for EVERY element**
+    (it is the initial value, not a flex-container signal). A pin that
+    locates its container loosely ("a div that HAS both the heading and the
+    countdown") matches the OUTER wrappers, whose default "row" passes the
+    desktop assertion vacuously and fails mobile with a confusing delta.
+    Locate the structural container directly — the countdown's
+    `data-testid` PARENT (`locator("..")`) — and assert alignment there
+    (session 8, P-14).
+25. **useSyncExternalStore requires a CACHED snapshot.** Re-deriving the
+    snapshot from the clock on every `getSnapshot` call can cross a second
+    boundary between React's calls (render → post-render check) and trip the
+    "getSnapshot should be cached" warning / re-render loop. The countdown
+    store caches its formatted string PER TICK — invalidated on each interval
+    fan-out and on re-arm (session 8, H-49).
 
 ## §10 Debugging Guide (symptom → cause → fix)
 
@@ -405,6 +435,8 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
 | Double-tap Remove/± in the cart throws P2025 → 500 in the logs | The line vanished between the action's pre-check and its write (§9 #21) | Atomic increment + `isRecordNotFound` catch → `ok` with the fresh DTO (fixed — do not regress) |
 | Pin on `bg-red-500` fails with `lab(...)` though the color is right | v4 default palette serializes in oklab (§9 #22) | Probe-element token comparison, not rgb string equality |
 | A new admin-login test makes LATER admin logins 429/bounce to /account | The per-IP admin bucket is exactly consumed at 10 (§9 #23) | SQL fixture via `prisma db execute` (H-2/H-39 pattern); never add logins |
+| A flexDirection/alignment pin passes on desktop but fails mobile with "row ≠ column" on a container you never meant to target | `flexDirection` defaults to "row" on every element — a div-has-both locator matches an outer wrapper (§9 #24) | Locate the structural container (the testid's direct parent) |
+| React warns "The result of getSnapshot should be cached" / re-renders in a loop | The store's getSnapshot re-derives from the clock each call and crosses a second boundary between React's reads (§9 #25) | Cache the snapshot per tick; invalidate on fan-out |
 | Drawer/modal keyboard users Tab into the page behind | Hand-rolled dialogs never moved focus or trapped Tab (H-26) | `installFocusTrap` in the surface's open-effect (`src/lib/focus-trap.ts`) — keep it on every new hand-rolled dialog |
 | E2E fails only on the SECOND run; drawer/cart specs see extra lines | Cross-run residue: the seed never deletes (§ session-5 H-22) | `global-setup` wipes carts/wishlists/sessions — keep it |
 | E2E drawer specs see TWO lines with one add (session-6, mid-run) | Within-run residue: the merge test left its line; fixed by cleaning up after itself + wiping ALL orders at setup (H-24/H-25) | `global-setup` order wipe + re-seed; specs that mutate shared state clean up |
@@ -412,8 +444,8 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
 ## §11 Pre-Ship Checklist
 
 ```bash
-npm run verify                      # typecheck → lint → 98 unit → build (+ assemble)
-npm run test:e2e                    # 57 cases × 2 projects (+2 setup; build FIRST — §9 #16)
+npm run verify                      # typecheck → lint → 109 unit → build (+ assemble)
+npm run test:e2e                    # 60 cases × 2 projects (+2 setup; build FIRST — §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present (no unsafe-eval in prod)
 
 # Parity pins
@@ -473,7 +505,14 @@ suites; no `db/*.db` staged; commit goes to `main` only.
     the drift hid in surfaces nobody had pinned, and a 5-minute SECTION-HEIGHT
     census (total 11079 vs clone 8771) is what exposed a 2308px divergence.
     Ritual: height census → pinned-surface re-measure → pin whatever you
-    measured, so the next drift is a red test, not a surprise.
+    measured, so the next drift is a red test, not a surprise. Session 8
+    validated the ritual: the census caught FOUR drifts in one sweep (size
+    chips on every card, the drawer tail removed, mobile card geometry
+    reverted to fixed 260px, the deals header merged) — all in never-pinned
+    or structurally-underpinned surfaces. Also: a data-driven delta (the
+    reference renaming/shortening a product name, changing wrap heights) is
+    CONTENT drift — accept and document it; pin STRUCTURE, not catalog
+    copy.
 
 ## §13 Pitfalls to Avoid (the "don't" list)
 
@@ -699,8 +738,8 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Commands & env | `AGENTS.md` |
 | Working standards | `CLAUDE.md` |
 | Deep architecture + ADRs | `Project_Architecture_Document.md` |
-| Latest remediation ledger | `docs/remediation-plan-session7.md` |
-| Session history | `docs/session_1.md` … `session_6.md`, `worklog.md` |
+| Latest remediation ledger | `docs/remediation-plan-session8.md` |
+| Session history | `docs/session_1.md` … `session_7.md`, `worklog.md` |
 | Parity screenshots | `docs/screenshots/` |
 | Mutation seam | `src/lib/actions/*.ts` |
 | Envelope | `src/lib/action-result.ts` |
@@ -710,6 +749,7 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Dialog focus contract | `src/lib/focus-trap.ts` (installFocusTrap — every hand-rolled dialog) |
 | Transient sweeper | `src/lib/sweeper.ts` (+ `src/instrumentation.ts` wiring) |
 | Cart stepper planner (pure) | `src/lib/adjust-plan.ts` (planAdjustment / planCorrection) |
+| Countdown store (re-arm seam) | `src/lib/countdown-store.ts` + `src/lib/countdown-store.test.ts` |
 | Sale countdown seam | `src/lib/countdown.ts` + `src/components/store/sale-countdown.tsx` |
 | Catalog source of truth | `src/lib/data/catalog.ts` (incl. HERO_SLIDES.align + BRAND_MARQUEE + COLOR_HEX) |
 | Seed | `prisma/seed.ts` (`npm run db:setup`) |

@@ -45,6 +45,9 @@ const eslintConfig = [
       "docs/**",
       "db/**",
       "tests/e2e/.auth/**",
+      // Sandbox tooling (CONNECT forward proxy for headless-Chromium external
+      // DNS — sessions 6–8); CommonJS by design, never committed.
+      "scripts/forward-proxy.js",
     ],
   },
 ];

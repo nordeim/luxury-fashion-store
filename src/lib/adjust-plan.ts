@@ -8,6 +8,13 @@
 //
 // The action in `src/lib/actions/cart.ts` executes these plans; conditional
 // corrections (WHERE quantity = observed) are the executor's job.
+//
+// H-50 (session-8) executor contract: for POSITIVE deltas the executor
+// re-reads stock immediately before planning and feeds the FRESH value to
+// both planAdjustment and planCorrection. Residual race: a sellout landing
+// between that read and the increment (~ms, serialized SQLite) still writes —
+// the consequence is bounded by the checkout stock guard (H-15), which owns
+// every over-stock conversation.
 
 export type AdjustPlan =
   | { kind: "skip" }
@@ -19,8 +26,11 @@ export type AdjustPlan =
  * action fired its atomic increment BEFORE the sold-out branch, so a stale
  * UI's "+" inflated the persisted line with no clamp at all. A decrement is
  * always allowed — the user may still shed the line (cleanup path).
+ * H-54: a zero delta is a skip on ANY line — a no-op must not UPDATE + touch
+ * the parent row + revalidate.
  */
 export function planAdjustment(delta: number, stock: number): AdjustPlan {
+  if (delta === 0) return { kind: "skip" };
   if (stock <= 0) {
     return delta < 0 ? { kind: "increment", delta } : { kind: "skip" };
   }

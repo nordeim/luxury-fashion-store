@@ -155,14 +155,27 @@ export async function adjustCartItemAction(
   // end-state already holds, so the action re-syncs the bag and returns ok
   // instead of throwing a raw 500.
   try {
-    const plan = planAdjustment(parsedDelta.data.delta, item.product.stock);
+    // H-50 (session-8): a POSITIVE delta must not grow against a stale
+    // snapshot — the pre-read can be arbitrarily old (a drawer DTO rendered
+    // minutes ago, stock zeroed since). Re-read stock immediately before
+    // planning; both the plan AND the correction base consume it. The
+    // residual window (a sellout landing between this read and the increment)
+    // is ~ms on serialized SQLite and is owned by the checkout guard (H-15) —
+    // documented in adjust-plan.ts. A decrement needs no re-read (it only
+    // sheds quantity; pre-existing over-quantities stay H-15's business).
+    let stockForWrite = item.product.stock;
+    if (parsedDelta.data.delta > 0) {
+      const freshPre = await db.product.findUnique({ where: { id: item.productId }, select: { stock: true } });
+      stockForWrite = freshPre?.stock ?? 0;
+    }
+    const plan = planAdjustment(parsedDelta.data.delta, stockForWrite);
     if (plan.kind === "increment") {
       const updated = await db.cartItem.update({
         where: { id: item.id },
         data: { quantity: { increment: plan.delta } },
         select: { quantity: true },
       });
-      const correction = planCorrection(updated.quantity, item.product.stock);
+      const correction = planCorrection(updated.quantity, stockForWrite);
       if (correction.kind === "delete") {
         // H-40: conditional — a concurrent increment landing after ours
         // changes `quantity` away from the observed value and survives.

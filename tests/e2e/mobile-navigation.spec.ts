@@ -39,7 +39,14 @@ test.describe("mobile navigation", () => {
     await expect(nav).toBeVisible();
     const links = nav.locator(":scope > div > a");
     const count = await links.count();
-    expect(count).toBeGreaterThanOrEqual(5); // reference menus + superset rows
+    // P-12 (session-8): the reference REMOVED its ACCOUNT/WISHLIST tail —
+    // the drawer is exactly the five reference menus now (Women, Men,
+    // Accessories, Designers, Sale), still inert-looking but REAL links
+    // (registered superset). If the reference re-adds a tail, restore ours.
+    expect(count).toBe(5);
+    const navText = (await nav.textContent()) ?? "";
+    expect(navText).not.toContain("Account");
+    expect(navText).not.toContain("Wishlist");
 
     // Every row strictly below the previous, none overlapping, real gaps.
     let previous: { y: number; height: number } | null = null;

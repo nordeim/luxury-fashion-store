@@ -259,8 +259,8 @@ test.describe("sold-out adjust guard (customer session)", () => {
 
     try {
       // Zero the stock BEHIND the open drawer — the drawer never re-renders,
-      // so its "+" is still enabled (line.stock is the stale 5): exactly the
-      // stale-UI window the fix guards.
+      // so its "+" is still enabled (line.stock is the stale seed value 12):
+      // exactly the stale-UI window the fix guards.
       setStock(0);
 
       // THE PIN: "+" on the sold-out line must not grow it. (Old build: the

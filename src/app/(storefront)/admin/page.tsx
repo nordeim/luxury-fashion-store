@@ -21,8 +21,8 @@ export default async function AdminPage() {
   const [orders, lowStockCount, lowStock, productCount, revenueAgg, orderCount] = await Promise.all([
     db.order.findMany({ orderBy: { placedAt: "desc" }, take: 8 }),
     // G-3 (session-4): the KPI reads a dedicated COUNT — the list below is
-    // take-capped (20), so lowStock.length would silently under-count once
-    // more than 20 products sit at or below the threshold (F-21 class).
+    // take-capped (8), so lowStock.length would silently under-count once
+    // more than 8 products sit at or below the threshold (F-21 class).
     db.product.count({ where: { isActive: true, stock: { lte: 3 } } }),
     db.product.findMany({
       where: { isActive: true, stock: { lte: 3 } },

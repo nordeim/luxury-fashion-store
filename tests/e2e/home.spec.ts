@@ -140,13 +140,21 @@ test.describe("home", () => {
     expect(styles.copies).toBe(2);
   });
 
-  test("product row cards are fixed 280px at desktop (P-4)", async ({ page }) => {
-    test.skip((page.viewportSize()?.width ?? 0) < 1024, "desktop-only pin");
+  test("product row cards are fixed-width at every breakpoint (P-4/P-13)", async ({ page }) => {
     await page.goto("/");
     const row = page.getByTestId("product-row").first();
     await expect(row).toBeVisible();
-    const box = await row.locator("[data-product-card]").first().boundingBox();
-    expect(box?.width).toBe(280);
+    const card = row.locator("[data-product-card]").first();
+    const width = page.viewportSize()?.width ?? 0;
+    // P-13 (session-8): the reference uses FIXED cards at ALL breakpoints —
+    // 260px below lg (measured @390), 280px at lg+ — inside a gap-6 scroll
+    // row (24px at every breakpoint; the old 2-up/3-up fractions + gap-4
+    // were the drift).
+    const expected = width >= 1024 ? 280 : 260;
+    const box = await card.boundingBox();
+    expect(box?.width).toBe(expected);
+    const gap = await row.evaluate((el) => getComputedStyle(el).columnGap);
+    expect(parseFloat(gap)).toBe(24);
   });
 
   test("the edit and UGC tiles are 3:4 with the reference copy (P-5/P-6)", async ({ page }) => {
@@ -204,13 +212,17 @@ test.describe("home", () => {
     const countdown = deals.getByTestId("sale-countdown");
     await expect(countdown).toBeVisible();
     // Digits carry their unit suffixes (08HRS:24MIN:00SEC). The server
-    // placeholder is 08:24:00 — real hydration starts the tick; poll until
-    // the text moves (2s window always catches a second flip once live).
+    // placeholder is 08:24:00 — real hydration starts the tick. H-51
+    // (session-8): ONE placeholder→client swap is not proof of ticking, so
+    // require TWO successive client-value transitions — the interval keeps
+    // firing while mounted (and keeps firing after H-49's re-arm).
     const readCd = () => countdown.evaluate((el) => el.textContent ?? "");
     const s0 = await readCd();
-    await expect.poll(readCd, { timeout: 10_000 }).not.toBe(s0); // real seconds elapsed
+    await expect.poll(readCd, { timeout: 10_000 }).not.toBe(s0); // placeholder → live
     const s1 = await readCd();
-    expect(s1).toMatch(/\d{2}HRS:\d{2}MIN:\d{2}SEC/);
+    await expect.poll(readCd, { timeout: 10_000 }).not.toBe(s1); // still ticking
+    const s2 = await readCd();
+    expect(s2).toMatch(/\d{2}HRS:\d{2}MIN:\d{2}SEC/);
     const boxes = await countdown.evaluate((el) => {
       const parts = Array.from(el.querySelectorAll("div"));
       const ink = parts.filter((d) => getComputedStyle(d).backgroundColor === "rgb(23, 20, 17)");
@@ -218,11 +230,115 @@ test.describe("home", () => {
     });
     expect(boxes.count).toBe(3);
     expect(boxes.w).toBe(48);
+    // P-14 (session-8): the header text and the countdown share ONE row —
+    // flex-col on mobile, flex-row at lg — with the countdown STACKED on the
+    // right (label ABOVE the boxes, right-aligned at lg). The row is the
+    // countdown's DIRECT parent (a div-has-both locator would match the
+    // outer containers, whose default flexDirection is vacuously "row").
+    const headerRow = deals.getByTestId("sale-countdown").locator("..");
+    const rowDir = await headerRow.evaluate((el) => getComputedStyle(el).flexDirection);
+    const vw = page.viewportSize()?.width ?? 0;
+    expect(rowDir).toBe(vw >= 1024 ? "row" : "column");
+    const stack = await countdown.evaluate((el) => {
+      const label = Array.from(el.querySelectorAll("div,span")).find((n) => /SALE ENDS IN/i.test(n.textContent ?? ""));
+      const boxesEl = Array.from(el.children).find((c) => c.querySelectorAll("div").length >= 3);
+      if (!label || !boxesEl) return null;
+      const lr = label.getBoundingClientRect();
+      const br = boxesEl.getBoundingClientRect();
+      return { labelAbove: lr.bottom <= br.top + 1, rightAligned: Math.abs(lr.right - br.right) < 3, leftAligned: Math.abs(lr.left - br.left) < 3 };
+    });
+    expect(stack).not.toBeNull();
+    expect(stack!.labelAbove).toBe(true);
+    if (vw >= 1024) expect(stack!.rightAligned).toBe(true);
+    else expect(stack!.leftAligned).toBe(true);
     // Bento: the featured deal + two stacked — the tall tile's h3 is 36px at
     // desktop, the stacked ones 30px (both white on gradient).
     await expect(deals.getByRole("heading", { name: "Up to 40% Off" })).toBeVisible();
     await expect(deals.getByRole("heading", { name: "Up to 30% Off" })).toBeVisible();
     await expect(deals.getByRole("heading", { name: "Up to 35% Off" })).toBeVisible();
+  });
+
+  test("deals header is one merged row with the measured type scale (P-14)", async ({ page }) => {
+    await page.goto("/");
+    const deals = page.getByTestId("exclusive-deals");
+    const kicker = deals.getByText("LIMITED TIME OFFER").first();
+    await expect(kicker).toBeVisible();
+    // The kicker sits 8px (mb-2) above the h2 — the old mb-3 12px was drift.
+    const mb = await kicker.evaluate((el) => getComputedStyle(el).marginBottom);
+    expect(parseFloat(mb)).toBe(8);
+    // The countdown's row owns the header: mb-12 (48px) below the row — the
+    // row IS the countdown's direct parent (single flex container).
+    const headerRow = deals.getByTestId("sale-countdown").locator("..");
+    const mb12 = await headerRow.evaluate((el) => getComputedStyle(el).marginBottom);
+    expect(parseFloat(mb12)).toBe(48);
+  });
+
+  test("bento tiles keep the reference geometry (H-55 — aspect + stretch pin)", async ({ page }) => {
+    await page.goto("/");
+    const bento = page.getByTestId("exclusive-deals").locator(".grid.grid-cols-1.lg\\:grid-cols-2").first();
+    await expect(bento).toBeVisible();
+    const vw = page.viewportSize()?.width ?? 0;
+    const geo = await bento.evaluate((el) => {
+      const tall = el.children[0] as HTMLElement;
+      const rightCol = el.children[1] as HTMLElement;
+      const tiles = Array.from(rightCol.children) as HTMLElement[];
+      const cs = (n: HTMLElement) => getComputedStyle(n);
+      return {
+        tallAspect: cs(tall).aspectRatio,
+        tileAspects: tiles.map((t) => cs(t).aspectRatio),
+        tallH: Math.round(tall.getBoundingClientRect().height),
+        rightH: Math.round(rightCol.getBoundingClientRect().height),
+        tileHs: tiles.map((t) => Math.round(t.getBoundingClientRect().height)),
+      };
+    });
+    if (vw >= 1024) {
+      // Desktop: the RIGHT tiles are 2:3 and the LEFT tile stretches to the
+      // right column's combined height (measured 628×1908 over 942+942+24).
+      expect(geo.tileAspects).toEqual(["2 / 3", "2 / 3"]);
+      expect(Math.abs(geo.tallH - geo.rightH)).toBeLessThanOrEqual(2);
+      const half = (geo.rightH - 24) / 2;
+      expect(Math.abs(geo.tileHs[0] - half)).toBeLessThanOrEqual(2);
+      expect(Math.abs(geo.tileHs[1] - half)).toBeLessThanOrEqual(2);
+    } else {
+      // Mobile: tall tile 4:3, stacked tiles 2:3 (re-measured 2026-10-15:
+      // 342×513 — the reference's mobile tiles render the image's natural
+      // 2:3 ratio; session-7's mobile 3:4 was the drift).
+      expect(geo.tallAspect).toBe("4 / 3");
+      expect(geo.tileAspects).toEqual(["2 / 3", "2 / 3"]);
+    }
+  });
+
+  test("product cards render a size-chip row under the swatches (P-11)", async ({ page }) => {
+    await page.goto("/");
+    const card = page.getByTestId("product-row").first().locator("[data-product-card]").first();
+    await expect(card).toBeVisible();
+    const chips = await card.evaluate((el) => {
+      // The size row is the flex-wrap row of bordered buttons AFTER the
+      // swatch row (the swatches are span[title] chips; sizes are buttons).
+      const buttons = Array.from(el.querySelectorAll(".flex-wrap button"));
+      return buttons.map((b) => {
+        const cs = getComputedStyle(b);
+        return { label: b.textContent?.trim() ?? "", fs: cs.fontSize, padY: cs.paddingTop, border: cs.borderTopWidth, radius: cs.borderRadius, bg: cs.backgroundColor };
+      });
+    });
+    // P-11: the reference renders ONE bordered chip per product size
+    // ("One Size" for the bag) — 10px, py-1, 1px border, square.
+    expect(chips.length).toBeGreaterThanOrEqual(1);
+    for (const chip of chips) {
+      expect(chip.fs).toBe("10px");
+      expect(parseFloat(chip.padY)).toBe(4);
+      expect(chip.border).toBe("1px");
+      expect(parseFloat(chip.radius)).toBe(0);
+    }
+    // Superset: clicking a chip selects the size the card's Add to Bag posts
+    // (selected state = border-foreground). Resting visuals have NO
+    // selection — matching the reference's uniform muted chips.
+    const first = card.locator(".flex-wrap button").first();
+    const before = await first.evaluate((el) => getComputedStyle(el).borderTopColor);
+    await first.click();
+    await expect
+      .poll(() => first.evaluate((el) => getComputedStyle(el).borderTopColor), { timeout: 5_000 })
+      .not.toBe(before); // React re-render timing — poll, don't race
   });
 
   test("sale grid is four equal fluid columns at desktop (P-9)", async ({ page }) => {

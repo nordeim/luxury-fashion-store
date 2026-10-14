@@ -1,10 +1,10 @@
 "use client";
 
 // Product card — PARITY SURFACE (classes byte-identical to the reference,
-// re-measured live 2026-10-15, P-10 session-7: the card text stack is brand /
-// NAME / stroke stars+(89) / price+compareAt / COLOR SWATCHES — no "NEW" chip
-// anywhere; sale cards carry a `-{discount}%` red-500 chip top-left on the
-// image). Structure:
+// re-measured live 2026-10-15, P-10 session-7 + P-11 session-8: the card text
+// stack is brand / NAME / stroke stars+(89) / price+compareAt / COLOR
+// SWATCHES / SIZE CHIPS — no "NEW" chip anywhere; sale cards carry a
+// `-{discount}%` red-500 chip top-left on the image). Structure:
 //   div.group.relative
 //     div.relative.overflow-hidden.bg-secondary.aspect-[3/4].rounded-lg
 //       img (object-cover, duration-700 group-hover:scale-105)
@@ -12,11 +12,16 @@
 //       sale chip: -{discount}% (bg-red-500, top-3 left-3, square)
 //       hover action row: Add to Bag (flex-1) + quick-view (w-10 h-10)
 //       wishlist heart (top-3 right-3, w-9 h-9 rounded-full)
-//     div.mt-4: brand kicker / name / stroke stars+reviews / price row / swatches
+//     div.mt-4: brand kicker / name / stroke stars+reviews / price row /
+//       swatches / size chips (P-11: one bordered button per product size —
+//       text-[10px] px-2.5 py-1 border-border text-muted-foreground, square,
+//       transparent bg; measured on every reference card incl. "One Size")
 //
 // Working functionality (the reference's handlers are inert — registered
 // superset): Add to Bag posts a server action; the heart toggles the DB
-// wishlist; the eye opens the quick-view modal.
+// wishlist; the eye opens the quick-view modal; clicking a size chip selects
+// the size Add to Bag posts (resting = unselected, exactly like the
+// reference's uniform muted chips).
 
 import { Heart, Eye, ShoppingBag, Star } from "lucide-react";
 import Link from "next/link";
@@ -38,12 +43,16 @@ export function ProductCard({ product, onQuickView }: ProductCardProps) {
   const [isPending, startTransition] = useTransition();
   // H-6 (session-5): a sold-out-under-you add must not look like a no-op.
   const [actionError, setActionError] = useState<string | null>(null);
+  // P-11 (session-8) superset: the size the card's Add to Bag posts — null
+  // until a chip is clicked (resting visuals = the reference's uniform
+  // unselected chips); sizes[0] remains the default post.
+  const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const wishlisted = wishlist.has(product.id);
   const onSale = product.compareAtPrice !== null && product.compareAtPrice > product.price;
 
   const addToBag = () => {
     startTransition(async () => {
-      const res = await addToCartAction(product.id, product.sizes[0] ?? "", 1);
+      const res = await addToCartAction(product.id, selectedSize ?? product.sizes[0] ?? "", 1);
       if (res.ok) {
         setActionError(null);
         setCart(res.data);
@@ -161,14 +170,39 @@ export function ProductCard({ product, onQuickView }: ProductCardProps) {
             chips). */}
         {product.colors.length > 0 && (
           <div className="flex items-center gap-1.5 mb-3">
-            {product.colors.slice(0, 5).map((color) => (
+            {product.colors.slice(0, 5).map((color, i) => (
               <span
-                key={color}
+                key={`${color}-${i}`}
                 title={color}
                 aria-label={`Color ${color}`}
                 className="w-4 h-4 rounded-full border border-border hover:scale-125 transition-transform"
                 style={{ backgroundColor: COLOR_HEX[color] ?? "transparent" }}
               />
+            ))}
+          </div>
+        )}
+        {/* P-11 (session-8): the SIZE-CHIP row — one bordered button per
+            product size, measured on EVERY reference card (10px / px-2.5
+            py-1 / border-border / muted-foreground / square / transparent).
+            Superset: clicking selects the size Add to Bag posts; the
+            selected chip gains border-foreground + ink text (the resting
+            grid stays uniform, matching the reference). */}
+        {product.sizes.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {product.sizes.map((size) => (
+              <button
+                key={size}
+                type="button"
+                aria-pressed={selectedSize === size}
+                onClick={() => setSelectedSize((prev) => (prev === size ? null : size))}
+                className={`font-body text-[10px] px-2.5 py-1 border transition-colors ${
+                  selectedSize === size
+                    ? "border-foreground text-foreground"
+                    : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"
+                }`}
+              >
+                {size}
+              </button>
             ))}
           </div>
         )}
