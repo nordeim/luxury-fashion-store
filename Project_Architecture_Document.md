@@ -172,7 +172,7 @@ luxury-fashion-store/
 ├── docs/
 │   ├── screenshots/            ← dev-server captures (parity evidence)
 │   └── legacy-homenest/        ← archived Vite-SPA lineage (sessions, remediation history)
-├── tests/e2e/                  ← Playwright: 8 spec files + global-setup + auth.setup
+├── tests/e2e/                  ← Playwright: 9 spec files + global-setup (seed + transient wipe) + auth.setup
 └── src/
     ├── instrumentation.ts      ← boot-time env guard (production fails fast without AUTH_SECRET)
     ├── app/
@@ -181,7 +181,7 @@ luxury-fashion-store/
     │   ├── not-found.tsx       ← measured 404 card
     │   ├── (auth)/login|register/page.tsx     ← chrome-less, force-dynamic, redirect-aware
     │   ├── (storefront)/layout.tsx            ← chrome composition point + StoreProvider init
-    │   ├── (storefront)/page.tsx              ← home: 12 sections in reference order
+    │   ├── (storefront)/page.tsx              ← home: 13 sections in reference order (hero, brand marquee, rows, deals, UGC)
     │   ├── (storefront)/shop/                 ← PLP (functional superset; deep-linkable filters)
     │   ├── (storefront)/product/[slug]/       ← PDP + JSON-LD + related row
     │   ├── (storefront)/cart/ checkout/ checkout/success/ wishlist/
@@ -207,6 +207,7 @@ luxury-fashion-store/
         ├── address.ts          ← schema-checked shipping-address parser (no raw JSON.parse)
         ├── image.ts            ← hardened catalog-image extraction (single firstImage contract)
         ├── prisma-errors.ts    ← isUniqueViolation (P2002) detector for retry loops
+        ├── search-params.ts    ← firstParam(): repeated query keys arrive as string[] (H-1)
         ├── money.ts / delivery.ts / products.ts
         └── data/catalog.ts     ← reference-extracted catalog, slides, menus, demo users
 ```
@@ -312,6 +313,11 @@ erDiagram
 | `OrderEvent` | orderId, type, actor (`system` \| `admin`, default `system`), createdAt | status timeline (placed → …); customer view hides `actor="admin"` notes |
 | `NewsletterSubscriber` | email (unique) | `/api/newsletter` |
 
+**Indexes (hot paths):** `Order.userId` (account history) + `Order.placedAt` (admin
+console sort/filter) added session 5 (H-12), completing session 3's F-20 FK set
+(`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
+`WishlistItem.wishlistId`).
+
 ### 4.2 Persistence Strategy
 
 - **Connection:** single `PrismaClient` singleton (HMR-safe `globalThis` cache); SQLite WAL defaults; no pool tuning needed at single-writer scope.
@@ -395,11 +401,11 @@ Hero crossfade `transition-opacity duration-700`, auto-rotate 5000ms; drawers/ov
 
 | Category | Files | Tests | Location | Framework |
 |---|---|---|---|---|
-| Unit (pure seams) | 9 | 72 | `src/lib/*.test.ts` | Vitest (node) |
+| Unit (pure seams) | 10 | 77 | `src/lib/*.test.ts` | Vitest (node) |
 | E2E setup | 1 | 1×2 projects | `tests/e2e/auth.setup.ts` | Playwright |
-| E2E functional | 8 | 64 runs | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
+| E2E functional | 9 | 45 cases × 2 profiles (91 passed + 1 desktop-only skip on mobile) | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
 
-E2E coverage map: home (hero/sections/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related) · cart+checkout (drawer steppers, empty state, totals, COD end-to-end) · auth (login card, wrong-password alert, register validation, logout) · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px, stacking, navigation, Escape/backdrop close)** · admin (role gate + console pages + **a real mutation flow**: status transition, carrier set, carrier clear — added in session 4 after G-1 proved page-visit tests prove nothing about action seams).
+E2E coverage map: home (hero **per-slide anchoring + push transition + brand marquee (P-1..P-3 pins)**/sections/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related) · cart+checkout (drawer steppers, empty state, totals, COD end-to-end, **card path incl. visible field errors (H-5)**, **guest→user cart merge at login (H-21 pin)**) · auth (login card, wrong-password alert, register validation, **register happy path (H-8)**, logout) · **account addresses (add/edit-prefill/update/set-default/delete — the H-4 remount pin)** · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px, stacking, navigation, Escape/backdrop close)** · admin (role gate + console pages + real mutation flows: order status/carrier set/clear; **orders take-cap COUNT pin (H-2, injects 104 rows)**; **product stock → storefront sellout path (H-7/H-15)**; **visibility toggle → /shop (H-7)**).
 
 ### 7.2 Test Patterns
 
@@ -410,8 +416,8 @@ E2E coverage map: home (hero/sections/newsletter) · shop (filters/sort/sale/sea
 ### 7.3 Pre-Deploy Checklist
 
 ```bash
-npm run verify      # typecheck → lint → 52 unit → production build (+ standalone assembly)
-npm run test:e2e    # 64 runs across chromium + mobile; requires the fresh build
+npm run verify      # typecheck → lint → 77 unit → production build (+ standalone assembly)
+npm run test:e2e    # 45 cases × 2 projects (+2 setup); requires the fresh build
 ```
 
 Both green = shippable. `npm run build` must re-run after ANY source change before E2E (the suite tests the built artifact, not dev).

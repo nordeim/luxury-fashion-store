@@ -22,6 +22,8 @@ export function ProductDetail({ product, related }: { product: ProductCardData; 
   const [qty, setQty] = useState(1);
   const [imageIdx, setImageIdx] = useState(0);
   const [isPending, startTransition] = useTransition();
+  // H-6 (session-5): action failures used to vanish — surface them inline.
+  const [actionError, setActionError] = useState<string | null>(null);
   const delivery = estimateDelivery();
   const onSale = product.compareAtPrice !== null && product.compareAtPrice > product.price;
   const wishlisted = wishlist.has(product.id);
@@ -30,8 +32,11 @@ export function ProductDetail({ product, related }: { product: ProductCardData; 
     startTransition(async () => {
       const res = await addToCartAction(product.id, size, qty);
       if (res.ok) {
+        setActionError(null);
         setCart(res.data);
         if (openDrawer) setCartOpen(true);
+      } else {
+        setActionError(res.error.message);
       }
     });
   };
@@ -47,6 +52,8 @@ export function ProductDetail({ product, related }: { product: ProductCardData; 
           else next.delete(product.id);
           return next;
         });
+      } else {
+        setActionError(res.error.message);
       }
     });
   };
@@ -191,6 +198,13 @@ export function ProductDetail({ product, related }: { product: ProductCardData; 
                 {product.stock > 0 ? "Add to Bag" : "Out of Stock"}
               </button>
             </div>
+            {/* H-6 (session-5): action failures (sold out under you, vanished
+                line, wishlist errors) surface here instead of vanishing. */}
+            {actionError && (
+              <p className="text-xs text-red-600 font-montserrat mb-3" role="alert" data-testid="pdp-action-error">
+                {actionError}
+              </p>
+            )}
             <div className="flex gap-3 mb-8">
               <button
                 type="button"

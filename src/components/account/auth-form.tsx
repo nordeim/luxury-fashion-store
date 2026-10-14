@@ -10,8 +10,7 @@
 
 import { ArrowLeft, Lock, Mail, User } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useActionState, useEffect } from "react";
+import { useActionState } from "react";
 import { loginAction, registerAction } from "@/lib/actions/auth";
 import { DEMO_USERS } from "@/lib/data/catalog";
 
@@ -21,19 +20,15 @@ interface AuthFormProps {
 }
 
 export function AuthForm({ mode, redirectTo }: AuthFormProps) {
-  const router = useRouter();
   const isSignIn = mode === "signin";
+  // Success is a SERVER-side redirect (loginAction/registerAction — session-5:
+  // an envelope + client push raced the action's own page re-render, whose
+  // authenticated /login guard bounced ?redirect=/cart logins to /account).
+  // This state only ever carries failures now.
   const [state, formAction, pending] = useActionState(
     isSignIn ? loginAction : registerAction,
     null as never,
   );
-
-  useEffect(() => {
-    if (state?.ok) {
-      router.push(state.data.redirect);
-      router.refresh();
-    }
-  }, [state, router]);
 
   const inputCls =
     "flex w-full rounded-xl pl-10 pr-3 h-11 sm:h-12 bg-slate-50/50 border border-slate-200 text-base md:text-sm placeholder:text-slate-600 focus:border-slate-400 focus:ring-slate-400 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none transition-colors";

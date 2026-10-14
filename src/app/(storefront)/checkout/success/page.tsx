@@ -7,6 +7,7 @@ import { verifyOrderViewToken } from "@/lib/order-token";
 import { formatCents } from "@/lib/money";
 import { estimateDelivery } from "@/lib/delivery";
 import { parseShippingAddress } from "@/lib/address";
+import { firstParam } from "@/lib/search-params";
 import { CheckCircle2, Package, Truck } from "lucide-react";
 
 export const metadata: Metadata = { title: "Order Confirmed" };
@@ -17,12 +18,14 @@ interface SuccessPageProps {
 }
 
 export default async function CheckoutSuccessPage({ searchParams }: SuccessPageProps) {
-  const { order: orderNumber, t: token } = await searchParams;
+  // G-8 (session-4) + H-1 (session-5): Next types searchParams values as
+  // string, but repeated keys (?t=a&t=b) arrive as string[] at runtime. Every
+  // value passes through firstParam — a non-string must simply fail
+  // verification (404), never reach the HMAC seam or a Prisma where malformed.
+  const { order: orderParam, t: tokenParam } = await searchParams;
+  const orderNumber = firstParam(orderParam);
+  const tokenValue = firstParam(tokenParam);
   if (!orderNumber) notFound();
-  // G-8 (session-4): Next types searchParams values as string, but repeated
-  // keys (?t=a&t=b) arrive as string[] at runtime. Coerce — a non-string must
-  // simply fail verification (404), never reach the HMAC seam malformed.
-  const tokenValue = Array.isArray(token) ? token[0] : token;
 
   const order = await db.order.findUnique({
     where: { number: orderNumber },

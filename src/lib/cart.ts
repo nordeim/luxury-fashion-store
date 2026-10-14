@@ -85,14 +85,21 @@ export async function findWishlist(userId: string | null) {
 /** Mutation-side: get or create the cart for user or guest (mints the cookie). */
 export async function getOrCreateCart(userId: string | null): Promise<string> {
   if (userId) {
-    const existing = await db.cart.findUnique({ where: { userId } });
-    if (existing) return existing.id;
-    // token is the row's unique identity — user carts keep a minted token
-    // so the row remains addressable before/after guest->user claiming.
-    const created = await db.cart.create({
-      data: { userId, token: randomBytes(24).toString("hex") },
+    // H-3 (session-5): findUnique→create raced P2002 across the seam on two
+    // concurrent first-adds by a brand-new user (the retry loop in
+    // addToCartAction never sees this call). upsert is atomic on the unique
+    // userId — the same shape mergeGuestCartIntoUser already uses.
+    const cart = await db.cart.upsert({
+      where: { userId },
+      update: {},
+      create: {
+        userId,
+        // token is the row's unique identity — user carts keep a minted token
+        // so the row remains addressable before/after guest->user claiming.
+        token: randomBytes(24).toString("hex"),
+      },
     });
-    return created.id;
+    return cart.id;
   }
   const store = await cookies();
   const token = store.get(CART_COOKIE)?.value;
@@ -114,12 +121,13 @@ export async function getOrCreateCart(userId: string | null): Promise<string> {
 
 export async function getOrCreateWishlist(userId: string | null): Promise<string> {
   if (userId) {
-    const existing = await db.wishlist.findUnique({ where: { userId } });
-    if (existing) return existing.id;
-    const created = await db.wishlist.create({
-      data: { userId, token: randomBytes(24).toString("hex") },
+    // H-3 (session-5): same upsert-on-unique as the cart seam.
+    const wishlist = await db.wishlist.upsert({
+      where: { userId },
+      update: {},
+      create: { userId, token: randomBytes(24).toString("hex") },
     });
-    return created.id;
+    return wishlist.id;
   }
   const store = await cookies();
   const token = store.get(WISHLIST_COOKIE)?.value;

@@ -1,6 +1,10 @@
-// Admin console — role gate (customer redirected), admin dashboard renders.
-// The admin login happens in-spec with a logged-out session (one extra auth
-// attempt is well under the 10/IP/15 min limiter budget).
+// Admin console — role gate (customer redirected), admin dashboard renders,
+// REAL admin mutations (order update, product stock/visibility).
+// The admin login happens in-spec with a logged-out session (a few extra auth
+// attempts are well under the 10/IP/15 min limiter budget).
+import { execSync } from "node:child_process";
+import path from "node:path";
+import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
 test.describe("admin role gate (customer session)", () => {
@@ -77,5 +81,121 @@ test.describe("admin console (admin session)", () => {
     await page.reload();
     await expect(page.getByLabel("Carrier")).toHaveValue("");
     await expect(page.getByLabel("Tracking Number")).toHaveValue("");
+  });
+
+  // Session 5, H-2: the table header must show the server COUNT, not the
+  // take-capped list length. The seed leaves the DB far below the take(100)
+  // cap — where `.length` and COUNT agree — so this test INJECTS enough rows
+  // to force divergence (104 total, 100 visible) and pins the header value.
+  test("orders header reports the true total past the take cap (H-2)", async ({ page }) => {
+    const e2eDb = path.resolve(process.cwd(), "db", "e2e.db");
+    const schema = path.resolve(process.cwd(), "prisma", "schema.prisma");
+    const inject = Array.from({ length: 104 }, (_, i) => {
+      const n = String(i + 1).padStart(3, "0");
+      return `INSERT INTO "Order" ("id","number","email","status","subtotal","shipping","total","shippingAddress","paymentMethod","placedAt","updatedAt") VALUES ('h2test${n}','ORD-9999-${n}','h2test@example.com','processing',100,0,100,'{}','cod',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);`;
+    }).join("\n");
+    const sqlFile = path.resolve(process.cwd(), "tests", "e2e", ".h2-inject.sql");
+    writeFileSync(sqlFile, inject);
+    const env = { ...process.env, DATABASE_URL: `file:${e2eDb}` };
+    const cleanup = () => {
+      writeFileSync(sqlFile, `DELETE FROM "Order" WHERE "number" LIKE 'ORD-9999-%';`);
+      execSync(`npx prisma db execute --schema ${schema} --file ${sqlFile}`, { env, stdio: "pipe" });
+    };
+
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("admin@aurelia.com");
+    await page.getByLabel("Password").fill("Admin1234!");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/account/);
+
+    try {
+      execSync(`npx prisma db execute --schema ${schema} --file ${sqlFile}`, { env, stdio: "pipe" });
+      await page.goto("/admin/orders");
+      // take(100) caps the visible rows at 100; the header must read the
+      // server COUNT (seeded orders + 104 injected), NOT orders.length.
+      const total = await page.getByTestId("orders-total").textContent();
+      expect(total?.trim()).toMatch(/1[0-9]{2} orders/); // >= 100+: three digits
+      const visible = await page.getByRole("link", { name: /ORD-\d{4}-\d{3}/ }).count();
+      expect(visible).toBe(100);
+      expect(Number.parseInt(total?.replace(/\D+/g, "") ?? "0", 10)).toBeGreaterThan(visible);
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Session 5, H-7 + H-15 + H-6: the LAST untested mutation seam. Sets a
+  // product's stock to 0 through the real admin form, then proves the
+  // storefront honors it: the fresh PDP renders sold out, and a STALE PDP
+  // (rendered pre-sellout, never reloaded) surfaces the action failure inline
+  // instead of silently doing nothing. Restores stock (try/finally — shared DB).
+  test("admin stock edit drives the storefront sellout path (H-7/H-15)", async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("admin@aurelia.com");
+    await page.getByLabel("Password").fill("Admin1234!");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/account/);
+
+    const stockInput = page.getByLabel("Stock for Wide-Brim Felt Hat");
+    const setBtn = stockInput.locator("..").getByRole("button", { name: "Set" });
+
+    // STALE PDP FIRST: rendered while stock is still 5 and kept open across
+    // the admin mutation (never reloaded) — a live React island whose server
+    // truth moves under it.
+    const stale = await page.context().newPage();
+    await stale.goto("/product/wide-brim-felt-hat");
+    const staleAdd = stale.locator("main").getByRole("button", { name: "Add to Bag" }).first();
+    await expect(staleAdd).toBeEnabled();
+
+    const pdp = await page.context().newPage();
+    try {
+      // Zero the stock through the admin form (row-scoped Set button).
+      await page.goto("/admin/products");
+      await stockInput.fill("0");
+      await setBtn.click();
+      await expect(page.getByRole("status")).toHaveText("Product updated.");
+
+      // A FRESH PDP renders sold out (server truth reaches RSC)…
+      await pdp.goto("/product/wide-brim-felt-hat");
+      await expect(pdp.getByRole("button", { name: "Out of Stock" })).toBeDisabled();
+
+      // …while the STALE page still shows an enabled button. Clicking it
+      // must fail visibly (H-15 server guard + H-6 inline surfacing).
+      await staleAdd.click();
+      await expect(stale.getByTestId("pdp-action-error")).toHaveText(/out of stock/i);
+      // The bag must not have grown: no drawer opened.
+      await expect(stale.getByTestId("cart-drawer")).toHaveCount(0);
+    } finally {
+      // Restore stock (shared DB — later specs shop this product).
+      await page.goto("/admin/products");
+      await stockInput.fill("12");
+      await setBtn.click();
+      await expect(page.getByRole("status")).toHaveText("Product updated.");
+      await stale.close();
+      await pdp.close();
+    }
+  });
+
+  // Session 5, H-7: visibility toggle drives /shop for real.
+  test("admin visibility toggle hides and restores a product on /shop (H-7)", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("admin@aurelia.com");
+    await page.getByLabel("Password").fill("Admin1234!");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/account/);
+
+    await page.goto("/admin/products");
+    await page.getByRole("button", { name: "Hide Wide-Brim Felt Hat" }).click();
+    await expect(page.getByRole("button", { name: "Show Wide-Brim Felt Hat" })).toBeVisible();
+
+    await page.goto("/shop");
+    await expect(page.getByRole("main")).not.toContainText("Wide-Brim Felt Hat");
+
+    // Restore.
+    await page.goto("/admin/products");
+    await page.getByRole("button", { name: "Show Wide-Brim Felt Hat" }).click();
+    await expect(page.getByRole("button", { name: "Hide Wide-Brim Felt Hat" })).toBeVisible();
+    await page.goto("/shop");
+    await expect(page.getByRole("main")).toContainText("Wide-Brim Felt Hat");
   });
 });

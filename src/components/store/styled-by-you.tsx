@@ -2,7 +2,9 @@
 
 // "Styled by You" — parity surface (cream bg): VELOUR LOOKBOOK kicker,
 // "Styled by *You*" h2, 4-col grid of UGC cards (image + tag + title + desc
-// on hover gradient).
+// on hover gradient). Re-measured live 2026-10-14 (P-6 session-5): grid gap-4
+// (16px, tighter than product rows' gap-6), tiles aspect-[3/4]; subtitle
+// "Tag @velour in your looks to be featured".
 
 import { UGC_CARDS } from "@/lib/data/catalog";
 
@@ -16,12 +18,12 @@ export function StyledByYou() {
             Styled by <span className="italic">You</span>
           </h2>
           <p className="text-sm text-muted-foreground font-montserrat mt-3 max-w-md mx-auto">
-            Tag #Velour to be featured in our community lookbook.
+            Tag @velour in your looks to be featured
           </p>
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {UGC_CARDS.map((card) => (
-            <div key={card.tag} className="group relative overflow-hidden aspect-[4/5] cursor-pointer">
+            <div key={card.tag} className="group relative overflow-hidden aspect-[3/4] cursor-pointer">
               { }
               <img
                 src={card.image}

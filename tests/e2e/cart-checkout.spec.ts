@@ -79,4 +79,78 @@ test.describe("cart + checkout", () => {
     await expect(page.getByText(/thank you|order confirmed/i).first()).toBeVisible();
     await expect(page.getByText(/ORD-\d{4}-\d{3}/).first()).toBeVisible();
   });
+
+  // Session 5, H-5 + H-8: the card path was never exercised end-to-end, and
+  // the server-computed fieldErrors used to be invisible on the review step.
+  // Pins: Luhn-invalid card → per-field error list + "Edit payment details"
+  // affordance; valid card → order placed.
+  test("card checkout surfaces field errors, then places the order (H-5/H-8)", async ({ page }) => {
+    await openDrawerWithItem(page);
+    await page.goto("/checkout");
+
+    const email = page.getByLabel("Email", { exact: true });
+    if (await email.count()) {
+      await email.fill("james@example.com");
+    }
+    await page.getByLabel("Full Name").fill("James Whitmore");
+    await page.getByLabel("Street Address").fill("212 Mercer Street, Apt 4B");
+    await page.getByLabel("City").fill("New York");
+    await page.getByLabel("State").fill("NY");
+    await page.getByLabel("ZIP").fill("10012");
+    await page.getByRole("button", { name: "Continue to Payment" }).click();
+
+    // Step 1 — CARD with a Luhn-invalid number.
+    await page.getByText("Credit Card").click();
+    await page.getByLabel("Card Number").fill("4242 4242 4242 4241");
+    await page.getByLabel("Expiry (MM/YY)").fill("12/28");
+    await page.getByLabel("CVC").fill("123");
+    await page.getByRole("button", { name: "Review Order" }).click();
+
+    // Step 2 — the field error is VISIBLE (was a dead-end before H-5).
+    // Scoped by text: the Next route announcer also carries role=alert.
+    await page.getByRole("button", { name: /place order/i }).click();
+    const alert = page.getByRole("alert").filter({ hasText: /valid card number/i });
+    await expect(alert).toContainText("Enter a valid card number", { timeout: 15_000 });
+    // The fieldErrors list renders one <li> per offending field.
+    await expect(alert.locator("li")).toHaveCount(1);
+    await expect(alert.getByRole("button", { name: /edit payment details/i })).toBeVisible();
+
+    // Fix the number on step 1 and place.
+    await alert.getByRole("button", { name: /edit payment details/i }).click();
+    await page.getByLabel("Card Number").fill("4242 4242 4242 4242");
+    await page.getByRole("button", { name: "Review Order" }).click();
+    await page.getByRole("button", { name: /place order/i }).click();
+
+    await expect(page).toHaveURL(/\/checkout\/success/, { timeout: 20_000 });
+    await expect(page.getByText(/ORD-\d{4}-\d{3}/).first()).toBeVisible();
+    // Card orders persist the last-4 on the confirmation.
+    await expect(page.getByText(/···· 4242/)).toBeVisible();
+  });
+});
+
+// Session 5, H-8: the guest→user cart merge had no coverage. A guest builds a
+// bag, signs in, and the bag must survive the merge (server truth).
+test.describe("guest cart merge at login", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test("guest bag survives sign-in (mergeGuestCartIntoUser)", async ({ page }) => {
+    const guestProduct = "wide-brim-felt-hat";
+    await page.goto(`/product/${guestProduct}`);
+    await page.locator("main").getByRole("button", { name: "Add to Bag" }).first().click();
+    await expect(page.getByTestId("cart-drawer")).toBeVisible();
+    await expect(page.getByTestId("cart-count")).toContainText("1 item");
+
+    // Sign in through the login form (redirect back to /cart).
+    await page.goto("/login?redirect=/cart");
+    await page.getByLabel("Email").fill("james@example.com");
+    await page.getByLabel("Password").fill("Demo1234!");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/cart/);
+
+    // The guest line is merged into the user cart (server truth).
+    await expect(page.getByText(/wide-brim|felt hat/i).first()).toBeVisible();
+    // …and the merged bag is a real server row: a reload keeps it.
+    await page.reload();
+    await expect(page.getByText(/wide-brim|felt hat/i).first()).toBeVisible();
+  });
 });

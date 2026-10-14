@@ -28,11 +28,18 @@ export async function POST(request: Request) {
   }
 
   const email = parsed.data.toLowerCase();
-  await db.newsletterSubscriber.upsert({
-    where: { email },
-    update: {},
-    create: { email },
-  });
+  try {
+    await db.newsletterSubscriber.upsert({
+      where: { email },
+      update: {},
+      create: { email },
+    });
+  } catch (error) {
+    // H-20 (session-5): degrade like the search route — a DB blip must not be
+    // a raw 500 on a whitelisted public endpoint.
+    console.error("newsletter subscribe failed", error);
+    return NextResponse.json({ ok: false, error: "Could not subscribe right now. Please try again." }, { status: 503 });
+  }
 
   return NextResponse.json({ ok: true });
 }

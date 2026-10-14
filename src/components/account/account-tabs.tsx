@@ -191,7 +191,11 @@ export function AccountTabs({
                 <p className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground mb-4 flex items-center gap-2">
                   <Plus size={13} /> {editing ? "Edit address" : "Add address"}
                 </p>
-                <form action={addressAction} className="flex flex-col gap-3">
+                <form key={editing?.id ?? "new"} action={addressAction} className="flex flex-col gap-3" data-testid="address-form">
+                  {/* H-4 (session-5): remount on target change — uncontrolled
+                      inputs keep their mount-time defaultValue, so editing
+                      used to submit stale/blank fields. key forces a fresh
+                      mount with the edited address's values. */}
                   {editing && <input type="hidden" name="id" value={editing.id} />}
                   <div>
                     <label className={labelCls} htmlFor="addr-label">Label</label>
@@ -229,13 +233,24 @@ export function AccountTabs({
                   {addressState?.ok && (
                     <p className="text-xs text-emerald-700" role="status">Address saved.</p>
                   )}
-                  <button
-                    type="submit"
-                    disabled={addressPending}
-                    className="bg-primary text-primary-foreground text-xs tracking-[0.2em] uppercase py-3.5 hover:bg-accent transition-colors font-montserrat disabled:opacity-50"
-                  >
-                    {addressPending ? "Saving…" : "Save Address"}
-                  </button>
+                  <div className="flex gap-3">
+                    <button
+                      type="submit"
+                      disabled={addressPending}
+                      className="flex-1 bg-primary text-primary-foreground text-xs tracking-[0.2em] uppercase py-3.5 hover:bg-accent transition-colors font-montserrat disabled:opacity-50"
+                    >
+                      {addressPending ? "Saving…" : "Save Address"}
+                    </button>
+                    {editing && (
+                      <button
+                        type="button"
+                        onClick={() => setEditing(null)}
+                        className="border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors text-xs tracking-[0.2em] uppercase px-6 font-montserrat"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
                 </form>
               </div>
             </div>

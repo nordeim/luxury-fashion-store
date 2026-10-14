@@ -3,9 +3,13 @@
 // Product row section — parity surface for New Arrivals / Our Bestsellers /
 // Women's Collection / Sale Items / Men's Edit / Fine Accessories:
 // header row (kicker gold + h2 serif with italic accents + arrows + VIEW ALL)
-// + horizontal scroll-snap row of product cards (the reference paginates with
+// + horizontal scroll row of FIXED-WIDTH product cards (re-measured live
+// 2026-10-14, P-4 session-5: the reference cards are `flex-shrink-0
+// w-[260px] lg:w-[280px]` in a `flex gap-6 overflow-x-auto hide-scrollbar
+// pb-4` row — 4.5 cards visible @1280; the old 25%-width fill measured 302px
+// and rendered every section 39px short). The reference paginates with
 // prev/next arrows; the clone scrolls with the same arrow chrome — same
-// visual, working behavior).
+// visual, working behavior (snap kept as a functional superset).
 //
 // Tailwind v4 note: the scroll row uses flex + snap; the section header is a
 // plain flex row (no space-y pitfalls).
@@ -90,14 +94,14 @@ export function ProductRowSection({
         </div>
         <div
           ref={scroller}
-          className="flex gap-4 lg:gap-6 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex gap-4 lg:gap-6 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           data-testid="product-row"
         >
           {products.map((product) => (
             <div
               key={product.id}
               data-product-card
-              className="w-[calc(50%-8px)] md:w-[calc(33.333%-16px)] lg:w-[calc(25%-18px)] shrink-0 snap-start"
+              className="w-[calc(50%-8px)] md:w-[calc(33.333%-16px)] lg:w-[280px] shrink-0 snap-start"
             >
               <ProductCard product={product} onQuickView={onQuickView} />
             </div>

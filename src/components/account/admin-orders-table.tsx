@@ -21,9 +21,11 @@ const STATUS_OPTIONS = ["processing", "in_transit", "delivered", "cancelled"] as
 
 export function AdminOrdersTable({
   orders,
+  total,
   filter,
 }: {
   orders: AdminOrderRow[];
+  total: number;
   filter: { status: string; q: string };
 }) {
   const [state, formAction] = useActionState(adminUpdateOrderAction, null);
@@ -63,8 +65,9 @@ export function AdminOrdersTable({
           </button>
         </form>
 
-        <p className="text-xs text-muted-foreground font-montserrat mb-4">
-          {orders.length} {orders.length === 1 ? "order" : "orders"}
+        <p className="text-xs text-muted-foreground font-montserrat mb-4" data-testid="orders-total">
+          {/* H-2 (session-5): server COUNT, not the take-capped list length. */}
+          {total} {total === 1 ? "order" : "orders"}
         </p>
 
         {state && !state.ok && (

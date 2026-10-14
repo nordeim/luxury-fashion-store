@@ -4,7 +4,7 @@
   "description": "AURELIA — production-grade luxury-fashion e-commerce storefront + admin (Next.js 16 + React 19 + Prisma/SQLite), a visual and functional superset clone of pastel-aurelia-fashion-edit.base44.app",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000 2>&1 | tee dev.log",
+    "dev": "next dev -p 3000",
     "build": "next build && node scripts/assemble-standalone.mjs",
     "start": "next start -p 3000",
     "lint": "eslint .",

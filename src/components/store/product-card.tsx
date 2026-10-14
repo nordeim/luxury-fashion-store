@@ -16,7 +16,7 @@
 
 import { Heart, Eye, ShoppingBag, Star } from "lucide-react";
 import Link from "next/link";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useStore } from "@/components/store/store-provider";
 import { addToCartAction } from "@/lib/actions/cart";
 import { toggleWishlistAction } from "@/lib/actions/wishlist";
@@ -31,6 +31,8 @@ export interface ProductCardProps {
 export function ProductCard({ product, onQuickView }: ProductCardProps) {
   const { setCart, setCartOpen, wishlist, setWishlist } = useStore();
   const [isPending, startTransition] = useTransition();
+  // H-6 (session-5): a sold-out-under-you add must not look like a no-op.
+  const [actionError, setActionError] = useState<string | null>(null);
   const wishlisted = wishlist.has(product.id);
   const onSale = product.compareAtPrice !== null && product.compareAtPrice > product.price;
 
@@ -38,8 +40,11 @@ export function ProductCard({ product, onQuickView }: ProductCardProps) {
     startTransition(async () => {
       const res = await addToCartAction(product.id, product.sizes[0] ?? "", 1);
       if (res.ok) {
+        setActionError(null);
         setCart(res.data);
         setCartOpen(true);
+      } else {
+        setActionError(res.error.message);
       }
     });
   };
@@ -55,6 +60,8 @@ export function ProductCard({ product, onQuickView }: ProductCardProps) {
           else next.delete(product.id);
           return next;
         });
+      } else {
+        setActionError(res.error.message);
       }
     });
   };
@@ -112,6 +119,11 @@ export function ProductCard({ product, onQuickView }: ProductCardProps) {
         </button>
       </div>
       <div className="mt-4">
+        {actionError && (
+          <p className="text-xs text-red-600 font-montserrat mb-1" role="alert">
+            {actionError}
+          </p>
+        )}
         <p className="font-sans text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">{product.brand}</p>
         <h3 className="font-sans font-medium text-foreground leading-snug mb-2 text-sm">
           <Link href={`/product/${product.slug}`} className="hover:text-gold transition-colors">

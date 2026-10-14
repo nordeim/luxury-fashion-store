@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getCurrentUser, hashPassword, verifyPassword, currentSessionToken } from "@/lib/auth";
 import { addressSchema, passwordSchema } from "@/lib/validation";
-import { fail, ok, type ActionResult } from "@/lib/action-result";
+import { fail, fieldErrorsFrom, ok, type ActionResult } from "@/lib/action-result";
 
 export async function updateProfileAction(
   _prev: unknown,
@@ -78,11 +78,9 @@ export async function saveAddressAction(
     country: formData.get("country") || "United States",
   });
   if (!parsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    for (const issue of parsed.error.issues) {
-      fieldErrors[String(issue.path[0] ?? "form")] = issue.message;
-    }
-    return fail("Check the highlighted fields", fieldErrors);
+    // H-19 (session-5): reuse the shared mapper (the hand-rolled loop here had
+    // drifted to last-wins semantics; fieldErrorsFrom is first-wins).
+    return fail("Check the highlighted fields", fieldErrorsFrom(parsed.error));
   }
 
   const existingId = String(formData.get("id") ?? "");

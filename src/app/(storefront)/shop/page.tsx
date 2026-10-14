@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { toProductCardData } from "@/lib/products";
+import { firstParam } from "@/lib/search-params";
 import { ShopClient } from "@/components/store/shop-client";
 
 export const metadata: Metadata = {
@@ -18,7 +19,14 @@ interface ShopPageProps {
 }
 
 export default async function ShopPage({ searchParams }: ShopPageProps) {
+  // H-1 (session-5): repeated query keys arrive as string[] — coerce each.
   const params = await searchParams;
+  const category = firstParam(params.category);
+  const search = firstParam(params.search);
+  const price = firstParam(params.price);
+  const sort = firstParam(params.sort);
+  const sale = firstParam(params.sale);
+  const designers = firstParam(params.designers);
   const products = await db.product.findMany({
     where: { isActive: true },
     include: { category: true },
@@ -29,12 +37,12 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
     <ShopClient
       products={products.map(toProductCardData)}
       initial={{
-        category: params.category ?? "",
-        search: params.search ?? "",
-        price: params.price ?? "",
-        sort: params.sort ?? "featured",
-        sale: params.sale === "1",
-        designers: params.designers === "1",
+        category: category ?? "",
+        search: search ?? "",
+        price: price ?? "",
+        sort: sort ?? "featured",
+        sale: sale === "1",
+        designers: designers === "1",
       }}
     />
   );

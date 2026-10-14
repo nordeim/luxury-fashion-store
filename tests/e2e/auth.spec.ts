@@ -34,6 +34,22 @@ test.describe("auth (logged out)", () => {
     await page.getByRole("button", { name: /create account/i }).click();
     await expect(page.getByText("Passwords do not match")).toBeVisible({ timeout: 10_000 });
   });
+
+  // Session 5, H-8: the register happy path was never exercised end-to-end
+  // (only the mismatch error above). Pins the session + account landing.
+  test("register creates an account and lands on /account (H-8)", async ({ page }) => {
+    await page.goto("/register");
+    const email = `e2e-reg-${Date.now()}@example.com`;
+    await page.getByLabel("Name").fill("Register Flow");
+    await page.getByLabel("Email").fill(email);
+    await page.locator("#password").fill("Password123");
+    await page.locator("#confirmPassword").fill("Password123");
+    await page.getByRole("button", { name: /create account/i }).click();
+    await expect(page).toHaveURL(/\/account/, { timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: /My Account/i })).toBeVisible();
+    // A fresh account has no orders — the empty history renders guidance.
+    await expect(page.getByText(/no orders|haven't placed/i).first()).toBeVisible();
+  });
 });
 
 test.describe("logout (signed in)", () => {

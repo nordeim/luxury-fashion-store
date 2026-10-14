@@ -181,6 +181,12 @@ model Order {
   user   User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
   items  OrderItem[]
   events OrderEvent[]
+
+  // H-12 (session-5): hot-path indexes completing the F-20 set — the account
+  // history reads by userId ordered by placedAt; the admin console sorts by
+  // placedAt.
+  @@index([userId])
+  @@index([placedAt])
 }
 
 model OrderItem {

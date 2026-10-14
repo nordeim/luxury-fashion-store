@@ -1,12 +1,16 @@
 "use client";
 
-// Home page composition — the 12 reference sections in order:
-// Hero → New Arrivals → The Edit → Our Bestsellers → Women's Collection →
-// Exclusive Deals → Sale Items → Men's Edit → Fine Accessories →
-// Styled by You. (Newsletter + Footer render from the group layout.)
+// Home page composition — the reference sections in order (re-measured
+// 2026-10-14, session 5 — the brand marquee sits between hero and New
+// Arrivals):
+// Hero → Brand Marquee → New Arrivals → The Edit → Our Bestsellers →
+// Women's Collection → Exclusive Deals → Sale Items → Men's Edit →
+// Fine Accessories → Styled by You. (Newsletter + Footer render from the
+// group layout.)
 
 import { useState } from "react";
 import { HeroCarousel } from "@/components/store/hero-carousel";
+import { BrandMarquee } from "@/components/store/brand-marquee";
 import { ProductRowSection } from "@/components/store/product-row";
 import { CategoryEdit } from "@/components/store/category-edit";
 import { ExclusiveDeals } from "@/components/store/exclusive-deals";
@@ -28,6 +32,7 @@ export function StorefrontHome({ products }: { products: ProductCardData[] }) {
   return (
     <>
       <HeroCarousel />
+      <BrandMarquee />
       <ProductRowSection
         kicker="JUST LANDED"
         title="New Arrivals"

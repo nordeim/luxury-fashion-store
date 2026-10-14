@@ -263,13 +263,13 @@ async function main() {
     },
   });
 
-  // G-6 (session-4): backfill actor="admin" for OrderEvents authored before
-  // the session-3 schema change (notes ending "by admin@…"). On a DB upgraded
-  // from a pre-session-3 build those rows default to actor="system" and would
-  // leak into customer-visible timelines (the customer view filters
-  // actor==="admin"). Idempotent — no-op on fresh/seeded DBs.
+  // G-6 (session-4) + H-10 (session-5): backfill actor="admin" for OrderEvents
+  // authored before the session-3 schema change. The matcher matches any
+  // admin-authored note ("by admin@…"), not one hard-coded email — an upgraded
+  // DB whose admin address changed must not re-leak events into customer
+  // timelines (the customer view filters actor==="admin"). Idempotent.
   const adminBackfill = await prisma.orderEvent.updateMany({
-    where: { actor: "system", note: { contains: "by admin@aurelia.com" } },
+    where: { actor: "system", note: { contains: "by admin@" } },
     data: { actor: "admin" },
   });
   if (adminBackfill.count > 0) console.info(`[seed] backfilled ${adminBackfill.count} admin order events`);

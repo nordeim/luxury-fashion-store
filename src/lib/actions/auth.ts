@@ -13,11 +13,12 @@ import {
   verifyPassword,
 } from "@/lib/auth";
 import { mergeGuestCartIntoUser, mergeGuestWishlistIntoUser } from "@/lib/cart";
+import { isUniqueViolation } from "@/lib/prisma-errors";
 import { clientIpFrom, rateLimit } from "@/lib/rate-limit";
 import { loginSchema, registerSchema, validateRedirectPath } from "@/lib/validation";
-import { fail, fieldErrorsFrom, ok, type ActionResult } from "@/lib/action-result";
+import { fail, fieldErrorsFrom, type ActionResult } from "@/lib/action-result";
 
-export async function loginAction(_prev: unknown, formData: FormData): Promise<ActionResult<{ redirect: string }>> {
+export async function loginAction(_prev: unknown, formData: FormData): Promise<ActionResult<never> | never> {
   const parsed = loginSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
@@ -44,10 +45,19 @@ export async function loginAction(_prev: unknown, formData: FormData): Promise<A
   await mergeGuestWishlistIntoUser(user.id);
 
   const redirectTo = validateRedirectPath(formData.get("redirect"));
-  return ok({ redirect: redirectTo });
+  // Session-5 (guest-merge E2E): success MUST redirect server-side. The old
+  // envelope + client-push design let the action's own page re-render race
+  // the client: the response re-renders /login AFTER createSession set the
+  // cookie, so the page guard's `redirect("/account")` rode along in the
+  // action payload and bounced ?redirect=/cart logins to /account (flaky —
+  // whichever redirect landed last won). A server action redirect responds
+  // with the redirect directive alone; the router follows it to the target
+  // (fresh RSC: session, merged cart, updated badge) and never re-renders
+  // /login. Failures still return the ActionResult envelope above.
+  redirect(redirectTo);
 }
 
-export async function registerAction(_prev: unknown, formData: FormData): Promise<ActionResult<{ redirect: string }>> {
+export async function registerAction(_prev: unknown, formData: FormData): Promise<ActionResult<never> | never> {
   const parsed = registerSchema.safeParse({
     email: formData.get("email"),
     name: formData.get("name") || undefined,
@@ -86,20 +96,37 @@ export async function registerAction(_prev: unknown, formData: FormData): Promis
       .slice(0, 80) ||
     "AURELIA Customer";
 
-  const user = await db.user.create({
-    data: {
-      email,
-      passwordHash: hashPassword(parsed.data.password),
-      name: derivedName,
-      role: "user",
-    },
-  });
+  // H-3 (session-5): two concurrent registers for the same email race past the
+  // findUnique above; the loser used to throw P2002 across the seam (raw 500).
+  // The unique violation IS the "account exists" outcome — map it to the same
+  // envelope the pre-check returns.
+  let user;
+  try {
+    user = await db.user.create({
+      data: {
+        email,
+        passwordHash: hashPassword(parsed.data.password),
+        name: derivedName,
+        role: "user",
+      },
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return fail("An account with this email already exists.", {
+        email: "An account with this email already exists.",
+      });
+    }
+    throw error;
+  }
 
   await createSession(user.id);
   await mergeGuestCartIntoUser(user.id);
   await mergeGuestWishlistIntoUser(user.id);
 
-  return ok({ redirect: "/account" });
+  // Session-5: server-side redirect for the same reason as loginAction — the
+  // action response must not re-render /register with a live session (its
+  // page guard redirects, racing the client push).
+  redirect("/account");
 }
 
 export async function logoutAction(): Promise<void> {

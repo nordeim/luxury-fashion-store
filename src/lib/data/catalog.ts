@@ -41,7 +41,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Silk Draped Evening Gown",
     brand: "MAISON ÉLITE",
     description: "Exquisite pure silk gown with cascading drape, adorned with hand-stitched detailing at the neckline.",
-    price: 2850, // $28.50
+    price: 2850, // $2,850.00
     compareAtPrice: 4200,
     discount: 32,
     category: "women",
@@ -60,7 +60,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Cashmere Overcoat",
     brand: "NORDIC ATELIER",
     description: "Supremely soft double-faced cashmere overcoat with structured silhouette and subtle lapels.",
-    price: 3400, // $34.00
+    price: 3400, // $3,400.00
     compareAtPrice: null,
     discount: 0,
     category: "women",
@@ -79,7 +79,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Tailored Wool Blazer",
     brand: "SAVILE & CO",
     description: "Hand-crafted in Milan, this tailored wool blazer features horn buttons and a signature satin lining.",
-    price: 1890, // $18.90
+    price: 1890, // $1,890.00
     compareAtPrice: 2600,
     discount: 27,
     category: "men",
@@ -98,7 +98,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Leather Crossbody Bag",
     brand: "LUNA VOSS",
     description: "Full-grain Italian leather crossbody with gold-toned hardware and adjustable strap.",
-    price: 1250, // $12.50
+    price: 1250, // $1,250.00
     compareAtPrice: null,
     discount: 0,
     category: "accessories",
@@ -117,7 +117,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Pleated Palazzo Trousers",
     brand: "MAISON ÉLITE",
     description: "Wide-leg palazzo trousers in fluid crepe fabric with a high waist and fluid pleated front.",
-    price: 890, // $8.90
+    price: 890, // $890.00
     compareAtPrice: 1400,
     discount: 36,
     category: "women",
@@ -136,7 +136,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Oxford Derby Shoes",
     brand: "CRESTWOOD",
     description: "Goodyear-welted derby shoes in premium calfskin with a hand-burnished finish.",
-    price: 780, // $7.80
+    price: 780, // $780.00
     compareAtPrice: null,
     discount: 0,
     category: "men",
@@ -155,7 +155,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Embroidered Silk Blouse",
     brand: "ORIENT LUXE",
     description: "100% pure silk blouse with intricate floral embroidery, mother-of-pearl buttons.",
-    price: 640, // $6.40
+    price: 640, // $640.00
     compareAtPrice: 950,
     discount: 33,
     category: "women",
@@ -174,7 +174,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Structured Tote Bag",
     brand: "LUNA VOSS",
     description: "Iconic structured tote in saffiano leather, featuring a zip closure and interior organizer pockets.",
-    price: 2100, // $21.00
+    price: 2100, // $2,100.00
     compareAtPrice: null,
     discount: 0,
     category: "accessories",
@@ -193,7 +193,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Merino Wool Turtleneck",
     brand: "NORDIC ATELIER",
     description: "Ultra-fine extra merino wool turtleneck in relaxed fit, naturally temperature-regulating.",
-    price: 420, // $4.20
+    price: 420, // $420.00
     compareAtPrice: 580,
     discount: 28,
     category: "men",
@@ -212,7 +212,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Wide-Brim Felt Hat",
     brand: "ATELIER CAPRI",
     description: "Premium 100% beaver felt hat with raw edge brim and grosgrain ribbon band.",
-    price: 320, // $3.20
+    price: 320, // $320.00
     compareAtPrice: null,
     discount: 0,
     category: "accessories",
@@ -231,7 +231,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Linen Suit Set",
     brand: "SAVILE & CO",
     description: "Two-piece linen suit tailored for warm seasons, with patch pockets and unlined jacket.",
-    price: 2200, // $22.00
+    price: 2200, // $2,200.00
     compareAtPrice: 3100,
     discount: 29,
     category: "men",
@@ -250,7 +250,7 @@ export const CATALOG_PRODUCTS: CatalogProduct[] = [
     name: "Crystal Drop Earrings",
     brand: "BIJOUX ÉTOILE",
     description: "Swarovski crystal drop earrings set in 18k gold-plated sterling silver.",
-    price: 480, // $4.80
+    price: 480, // $480.00
     compareAtPrice: null,
     discount: 0,
     category: "accessories",
@@ -273,12 +273,26 @@ export interface HeroSlide {
   description: string;
   cta: string;
   image: string;
-  align: "left" | "right" | "center";
+  align: "left" | "right"; // P-1: live-measured 2026-10-14 — slides anchor left/right, never center
   accent: string;
 }
 
 // 3 hero slides (auto-rotating carousel on the reference home).
-export const HERO_SLIDES: HeroSlide[] = [{"id":1,"title":"The New","subtitle":"Autumn Collection","description":"Crafted for those who define their own elegance","cta":"Explore Collection","image":"https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=1600&q=90&fm=jpg&fit=crop","align":"left","accent":"WOMEN'S COLLECTION 2026"},{"id":2,"title":"Timeless","subtitle":"Tailoring","description":"Where heritage meets contemporary craft","cta":"Shop Men's","image":"https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?w=1600&q=90&fm=jpg&fit=crop","align":"right","accent":"MEN'S COLLECTION 2026"},{"id":3,"title":"Rare","subtitle":"Accessories","description":"Finishing touches that define the whole","cta":"Discover More","image":"https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1600&q=90&fm=jpg&fit=crop","align":"center","accent":"ACCESSORIES EDIT"}];
+export const HERO_SLIDES: HeroSlide[] = [{"id":1,"title":"The New","subtitle":"Autumn Collection","description":"Crafted for those who define their own elegance","cta":"Explore Collection","image":"https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=1600&q=90&fm=jpg&fit=crop","align":"left","accent":"WOMEN'S COLLECTION 2026"},{"id":2,"title":"Timeless","subtitle":"Tailoring","description":"Where heritage meets contemporary craft","cta":"Shop Men's","image":"https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?w=1600&q=90&fm=jpg&fit=crop","align":"right","accent":"MEN'S COLLECTION 2026"},{"id":3,"title":"Rare","subtitle":"Accessories","description":"Finishing touches that define the whole","cta":"Discover More","image":"https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1600&q=90&fm=jpg&fit=crop","align":"right","accent":"ACCESSORIES EDIT"}];
+
+// P-3 (session-5): the reference's brand marquee under the hero — 8 houses in
+// catalog-brand order, separated by gold ◆, doubled in the component for the
+// seamless 30s loop. Measured live 2026-10-14.
+export const BRAND_MARQUEE: string[] = [
+  "MAISON ÉLITE",
+  "NORDIC ATELIER",
+  "SAVILE & CO",
+  "LUNA VOSS",
+  "ORIENT LUXE",
+  "CRESTWOOD",
+  "BIJOUX ÉTOILE",
+  "ATELIER CAPRI",
+];
 
 export interface CategoryCard {
   id: string;

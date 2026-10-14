@@ -4,7 +4,7 @@ description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commer
 version: 1.0.0
 last_updated: 2026-10-14
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
-project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 52/52 unit ✓ build ✓ 64/64 E2E ✓ (31 unique cases × chromium+mobile + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
+project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 77/77 unit (10 files) ✓ build ✓ E2E 91 passed + 1 skipped (45 unique cases × chromium+mobile, one desktop-only pin skips on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
 reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only prototype (inert commerce buttons). This repo is its functional superset with resting-state visual parity."
 ---
 
@@ -22,8 +22,9 @@ reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only protot
 
 **What it is:** a production-grade luxury-fashion storefront + admin console. The
 reference site is a polished *visual prototype* — working login, cart drawer and
-search overlay, but every commerce action (`Add to Bag`, category cards, wishlist)
-has `hasOnClick: false` and every catalog route 404s. This repo reproduces its look
+search overlay, but every commerce action (`Add to Bag`, category cards, mobile
+menu links — ALL of them as of session 5's sweep) has `hasOnClick: false` and
+every catalog route 404s. This repo reproduces its look
 exactly (measured computed styles) and makes every interaction real.
 
 **The parity law (binding):** on every parity surface — announcement bar, header,
@@ -42,8 +43,14 @@ typography. Functional additions may extend those surfaces, never restyle them.
   `--radius-lg: 4px` (soft radii only exist for xl/2xl/3xl utility scales).
 - Centered logotype "VELOUR" with "PARIS · MILAN · NEW YORK" tagline between split
   left nav and right icon cluster.
+- Hero slides anchor HORIZONTALLY per slide (session-5 re-measure): slide 1
+  `justify-start` + text-left, slides 2–3 `justify-end` + text-left — with a
+  horizontal push transition (translateX ±100%), never a cross-fade.
+- Brand marquee strip directly under the hero: border-y, 30s linear marquee,
+  8 houses separated by gold ◆ (P-3).
 - Hover-revealed commerce: product card action row (ADD TO BAG / eye / heart)
-  appears on hover, exactly like the reference.
+  appears on hover, exactly like the reference; product rows use FIXED 280px
+  cards at desktop (not container-width fractions).
 
 **Superset mission:** everything the reference fakes, this codebase really does —
 full catalog, cart, guest+member checkout (card + COD), wishlist, customer accounts,
@@ -59,8 +66,8 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | Styling | Tailwind CSS (CSS-first `@theme`) | 4.3.3 | v4 traps — see §9 #1–#2 |
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
-| Unit tests | Vitest (node env) | 3.2.7 | 72 tests in `src/lib/*.test.ts` (9 files) |
-| E2E | Playwright (standalone server) | 1.64.0 | 64 executions + 2 setup |
+| Unit tests | Vitest (node env) | 3.2.7 | 77 tests in `src/lib/*.test.ts` (10 files) |
+| E2E | Playwright (standalone server) | 1.64.0 | 45 unique cases × 2 device projects (+2 setup) |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -150,7 +157,7 @@ for SALE, stars, and focus rings — never as a fill.
 ```text
 src/app/
   layout.tsx                root (fonts, globals)
-  globals.css               @theme inline tokens + @font-face + v4 pins
+  globals.css               @theme inline tokens + @font-face + v4 pins + marquee keyframes
   not-found.tsx
   (auth)/login | register   measured slate-card auth surfaces (no chrome)
   (storefront)/             chrome composition point (header/footer/nav/drawers)
@@ -172,12 +179,15 @@ StoreProvider re-syncs client state from those DTOs
 ```
 
 Key components (`src/components/store/`): `announcement-bar`, `header` (desktop
-dropdowns + icon cluster), `mobile-nav` (the v4-pinned drawer), `cart-drawer`
-(Radix sheet), `search-overlay` (typeahead via `/api/search`), `product-card`
-(hover-revealed action row), `product-row` (horizontal scroll rows), `hero-carousel`,
+dropdowns + icon cluster), `mobile-nav` (the v4-pinned drawer), `brand-marquee`
+(the 30s strip under the hero), `hero-carousel` (per-slide left/right anchor +
+push transition), `cart-drawer`
+(Radix-style sheet), `search-overlay` (typeahead via `/api/search`), `product-card`
+(hover-revealed action row), `product-row` (fixed-width scroll rows), `category-edit`,
+`exclusive-deals`, `styled-by-you`, `quick-view-modal`,
 `shop-client` (PLP filters + URL sync), `product-detail` (PDP gallery/chips/stepper),
-`cart-page-client`, `wishlist-client`, `storefront-home` (12-section home), `footer`,
-`newsletter`, `category-edit`, `exclusive-deals`, `styled-by-you`, `quick-view-modal`.
+`cart-page-client`, `wishlist-client`, `storefront-home` (13-section home), `footer`,
+`newsletter`.
 
 `src/components/ui/`: local shadcn-style primitives (button, input, sheet, dialog,
 dropdown-menu, select, …) — Radix underneath, tokens from §4.
@@ -294,8 +304,23 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
     `adminUpdateOrderAction` shipped 100% broken (every admin mutation 500'd)
     through typecheck + lint + unit + E2E (session 4, G-1). Defense-in-depth:
     ESLint `no-restricted-globals` in `eslint.config.mjs` now errors on bare
-    `status`/`name`/`origin`/`event`/`close`, and an E2E must exercise every
-    mutation seam (a page-visit test proves nothing about the action).
+    `status`/`name`/`origin`/`event`/`close` (session 5 extended it with
+    `title`/`length`/`top`/`self`/`parent`/`closed`), and an E2E must exercise
+    every mutation seam (a page-visit test proves nothing about the action).
+19. **[CRITICAL] `@theme inline` does not emit nested `@keyframes`** — session 5
+    defined `--animate-marquee` + `@keyframes marquee` inside the `@theme inline`
+    block; the utility was generated but `animation-name` resolved to `none`
+    (the keyframes never shipped). **Keyframes live at the TOP LEVEL of
+    `globals.css`**; only the `--animate-*` mapping belongs in the theme.
+    Caught by the marquee E2E pin (computes `animation-name`).
+20. **[CRITICAL] A server action's response re-renders the CURRENT route — auth
+    actions must `redirect()` server-side.** `loginAction` used to return an
+    envelope for a client `router.push`: the action response re-rendered
+    /login AFTER `createSession` set the cookie, so the page guard's
+    `redirect("/account")` rode along in the payload and raced the client
+    push — `?redirect=/cart` logins flakily bounced to /account (session 5,
+    H-21; found by the guest-cart-merge E2E). Success paths of login/register
+    now call `redirect(...)` server-side; failures keep the envelope.
 
 ## §10 Debugging Guide (symptom → cause → fix)
 
@@ -315,12 +340,15 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
 | Fix verified in `next dev` but E2E still fails on the old behavior | Stale standalone bundle (§9 #16) | `env -u DATABASE_URL npm run build`, then re-run `npm run test:e2e` |
 | Console full of CSP violations in dev; page half-hydrates | Production CSP applied to dev | Keep the `unsafe-eval` dev-conditional in `next.config.ts` (§9 #17) |
 | Server action compiles but 500s with `ReferenceError: <x> is not defined` | Bare identifier shadowed by a DOM-lib global (§9 #18) | Destructure/import explicitly; `npm run lint` (no-restricted-globals) catches it at the gate |
+| `animate-*` utility applies but `animation-name` computes `none` | Keyframes nested inside `@theme inline` never emit (§9 #19) | Move `@keyframes` to the top level of `globals.css` |
+| Login with `?redirect=X` lands on /account instead of X (flaky) | Envelope + client push raced the action's re-rendered /login guard (§9 #20) | Server-side `redirect()` in the auth actions (fixed — do not regress) |
+| E2E fails only on the SECOND run; drawer/cart specs see extra lines | Cross-run residue: the seed never deletes (§ session-5 H-22) | `global-setup` wipes carts/wishlists/sessions — keep it |
 
 ## §11 Pre-Ship Checklist
 
 ```bash
-npm run verify                      # typecheck → lint → 72 unit → build (+ assemble)
-npm run test:e2e                    # 64 executions + 2 setup (build FIRST — standalone, §9 #16)
+npm run verify                      # typecheck → lint → 77 unit → build (+ assemble)
+npm run test:e2e                    # 45 cases × 2 projects (+2 setup; build FIRST — §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present (no unsafe-eval in prod)
 
 # Parity pins
@@ -368,6 +396,14 @@ suites; no `db/*.db` staged; commit goes to `main` only.
    in session 4 (G-1: the F-9 destructure dropped `status`; G-1b: `??` defeated
    the clear path) — now guarded by ESLint `no-restricted-globals`, a mutation-
    exercising E2E, and value-pinned KPI assertions.
+10. **The reference MOVES — re-measure everything, every session.** Session 5's
+    sweep found the hero's per-slide left/right anchoring and the brand marquee
+    had drifted (or been mis-recon'd) since session 1, while session 4's own
+    screenshot already showed it — because that sweep only re-measured the
+    mobile menu. The reference even flipped its own mobile-menu links to inert
+    divs mid-project. Doctrine: capture fresh computed styles on every parity
+    surface you touch, never trust the previous session's baseline, and pin
+    what you measure into E2E so the next drift is a red test, not a surprise.
 
 ## §13 Pitfalls to Avoid (the "don't" list)
 
@@ -482,8 +518,8 @@ Mobile-first; census at distillation time: `lg:` ×97, `sm:` ×21, `md:` ×15 �
 |---|---|---|
 | Navigation | "Open menu" button → `w-80` flush-left drawer (`flex flex-col gap-5`, `p-8`, uppercase items, divider, ACCOUNT/WISHLIST superset) | Inline dropdowns (WOMEN/MEN/ACCESSORIES) + right icon cluster + gold SALE |
 | Header layout | hamburger · logotype · search/heart/bag | split nav · centered VELOUR · icons |
-| Product rows | horizontal scroll with arrow steppers | multi-column grid |
-| Hero | stacked type, slide dots | full-bleed carousel, arrows, `01 / 03` counter |
+| Hero | stacked type; slide 1 left-anchored, slides 2–3 right-anchored (same as desktop) | full-bleed carousel, arrows, `01 / 03` counter |
+| Product rows | horizontal scroll, 2-up fraction-width cards | fixed `w-[280px]` cards, 4.5 visible, arrow steppers |
 | Auth card | full-width slate card | centered fixed-width card |
 
 Validated at 390×844 (iPhone-class) and 1440×900 (desktop).
@@ -593,14 +629,15 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Commands & env | `AGENTS.md` |
 | Working standards | `CLAUDE.md` |
 | Deep architecture + ADRs | `Project_Architecture_Document.md` |
-| Latest remediation ledger | `docs/remediation-plan-session4.md` |
-| Session history | `docs/session_1.md` … `session_3.md`, `worklog.md` |
+| Latest remediation ledger | `docs/remediation-plan-session5.md` |
+| Session history | `docs/session_1.md` … `session_4.md`, `worklog.md` |
 | Parity screenshots | `docs/screenshots/` |
 | Mutation seam | `src/lib/actions/*.ts` |
 | Envelope | `src/lib/action-result.ts` |
 | DTO contract (pure) | `src/lib/cart-dto.ts` |
 | DB resolver (do not simplify) | `src/lib/db-path.ts` |
-| Catalog source of truth | `src/lib/data/catalog.ts` |
+| searchParams coercion | `src/lib/search-params.ts` (firstParam — every consumer) |
+| Catalog source of truth | `src/lib/data/catalog.ts` (incl. HERO_SLIDES.align + BRAND_MARQUEE) |
 | Seed | `prisma/seed.ts` (`npm run db:setup`) |
 | Tokens & fonts | `src/app/globals.css`, `public/fonts/` |
 | Mobile nav v4 pin | `src/components/store/mobile-nav.tsx` + `tests/e2e/mobile-navigation.spec.ts` |

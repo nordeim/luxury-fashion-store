@@ -167,6 +167,22 @@
 
   /* Sale-badge red (v3 red-600 hex). */
   --color-red-600: #dc2626;
+
+  /* P-3 (session-5): brand marquee — the reference runs a 30s linear loop
+     translating the doubled track by -50% (seamless). NOTE: the keyframes
+     live at the TOP LEVEL of this file (below) — @theme inline does not emit
+     nested @keyframes, only the --animate-* utility mapping. */
+  --animate-marquee: marquee 30s linear infinite;
+}
+
+/* P-3 (session-5): marquee keyframes — top-level so they always ship. */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
 }
 
 @layer base {

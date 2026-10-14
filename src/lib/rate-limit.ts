@@ -52,6 +52,12 @@ export function rateLimit(key: string, max: number, windowMs: number): RateLimit
  */
 export function clientIpFrom(headers: Headers): string {
   if (process.env.TRUST_PROXY === "1") {
+    // H-18 (session-5, assumption pinned): the FIRST x-forwarded-for hop is
+    // used. This is correct only while the trusted proxy OVERWRITES the hop
+    // header (nginx `proxy_set_header X-Forwarded-For $remote_addr`); a proxy
+    // that APPENDS would leave the leftmost value client-controlled and the
+    // buckets rotatable again. If your proxy appends, take the LAST hop
+    // instead. Documented in README (Production Build & Deploy).
     const fwd = headers.get("x-forwarded-for");
     if (fwd) return fwd.split(",")[0].trim();
     return headers.get("x-real-ip") ?? "local";

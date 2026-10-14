@@ -1,19 +1,35 @@
 "use client";
 
-// Hero carousel — parity surface (measured live 2026-10-14):
+// Hero carousel — parity surface (re-measured live 2026-10-14, session 5):
 // section relative w-full h-[70vh] lg:h-[90vh] overflow-hidden bg-primary;
 // slides: bg-cover bg-center + bg-gradient-to-r from-black/60 via-black/20
-// to-transparent; content centered max-w-lg text-center (accent kicker
-// tracking-[0.4em] text-white/70, h2 text-6xl lg:text-8xl font-light,
-// h3 italic text-5xl lg:text-7xl, p text-sm text-white/80, outlined CTA);
-// arrows w-10 h-10 border-white/50; dots w-2 h-[2px] (active w-8 bg-white);
-// counter bottom-right "01 / 03". Auto-rotates every 6s (reference pace).
+// to-transparent; content block `text-white max-w-lg text-left` inside a
+// `flex items-center px-10 lg:px-20` layer whose justify flips PER SLIDE from
+// slide.align — slide 1 anchors LEFT (justify-start), slides 2–3 anchor RIGHT
+// (justify-end). All hero copy is left-aligned within the block; the
+// description has NO mx-auto (P-1: the centered-hero implementation predated
+// this measurement).
+//
+// Transition (P-2): the reference PUSHES slides horizontally — each wrapper
+// sits at translateX((i - active) * 100%) with a 700ms ease; the active slide
+// rests at identity. Inactive slides are inert (H-13: no focusable content
+// hidden from AT).
+//
+// Chrome: arrows w-10 h-10 border-white/50; dots w-2 h-[2px] (active w-8
+// bg-white); counter bottom-right "01 / 03". Auto-rotates every 6s.
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HERO_SLIDES } from "@/lib/data/catalog";
 
 const AUTO_ROTATE_MS = 6000;
+
+const JUSTIFY: Record<HeroSlideAlign, string> = {
+  left: "justify-start",
+  right: "justify-end",
+};
+
+type HeroSlideAlign = (typeof HERO_SLIDES)[number]["align"];
 
 export function HeroCarousel() {
   const [active, setActive] = useState(0);
@@ -43,18 +59,26 @@ export function HeroCarousel() {
   return (
     <section className="relative w-full h-[70vh] lg:h-[90vh] overflow-hidden bg-primary" data-testid="hero-carousel">
       {HERO_SLIDES.map((s, i) => (
-        <div key={s.id} className="absolute inset-0 transition-opacity duration-700" style={{ opacity: i === active ? 1 : 0 }} aria-hidden={i !== active}>
+        <div
+          key={s.id}
+          className="absolute inset-0 transition-transform duration-700"
+          style={{ transform: `translateX(${(i - active) * 100}%)` }}
+          aria-hidden={i !== active}
+          inert={i !== active}
+          data-active={i === active}
+          data-testid={`hero-slide-${i}`}
+        >
           <div
             className="absolute inset-0 bg-cover bg-center"
             style={{ backgroundImage: `url("${s.image}")` }}
           />
           <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/20 to-transparent" />
-          <div className="absolute inset-0 flex items-center justify-center px-10 lg:px-20">
-            <div className="text-white max-w-lg text-center">
+          <div className={`absolute inset-0 flex items-center ${JUSTIFY[s.align]} px-10 lg:px-20`}>
+            <div className="text-white max-w-lg text-left" data-testid={`hero-content-${i}`}>
               <div className="text-xs tracking-[0.4em] font-light mb-4 text-white/70 font-montserrat">{s.accent}</div>
               <h2 className="font-cormorant text-6xl lg:text-8xl font-light leading-none mb-2">{s.title}</h2>
               <h3 className="font-cormorant text-5xl lg:text-7xl font-light italic leading-none mb-6">{s.subtitle}</h3>
-              <p className="text-sm font-light tracking-wider text-white/80 font-montserrat mb-10 max-w-sm mx-auto">
+              <p className="text-sm font-light tracking-wider text-white/80 font-montserrat mb-10 max-w-sm">
                 {s.description}
               </p>
               <a

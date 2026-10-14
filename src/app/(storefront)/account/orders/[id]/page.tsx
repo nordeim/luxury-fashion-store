@@ -133,7 +133,10 @@ export default async function AccountOrderDetailPage({
               </p>
               {order.carrier && (
                 <p className="text-xs font-montserrat mt-3">
-                  {order.carrier} — {order.trackingNumber}
+                  {/* H-11 (session-5): join only the parts that exist — the old
+                      template rendered a dangling "DHL —" when tracking is null
+                      (the G-11 render-site sibling). */}
+                  {[order.carrier, order.trackingNumber].filter(Boolean).join(" — ")}
                 </p>
               )}
             </div>

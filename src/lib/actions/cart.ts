@@ -14,9 +14,15 @@ import { cartAddSchema, cartDeltaSchema } from "@/lib/validation";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { isUniqueViolation } from "@/lib/prisma-errors";
 
-/** Clamp for a requested quantity against available stock. */
+/**
+ * Clamp for a requested quantity against available stock. 0 means the stock
+ * is gone — callers decide between "leave the line alone" and "reject the add"
+ * (H-15, session-5: the old floor of 1 wrote a qty-1 line for a sold-out piece
+ * when the G-4 per-attempt re-read caught a mid-loop sellout).
+ */
 function clampToStock(requested: number, stock: number): number {
-  return Math.max(1, Math.min(requested, Math.max(stock, 0)));
+  if (stock <= 0) return 0;
+  return Math.max(1, Math.min(requested, stock));
 }
 
 export async function addToCartAction(
@@ -43,13 +49,21 @@ export async function addToCartAction(
   // catch — a second violation (3-way race) escaped as a 500, and the clamp
   // reused pre-race stock. Bounded loop instead: re-read stock + line each
   // attempt; the final failure maps to the ActionResult envelope.
-  const upsertLine = async (): Promise<void> => {
+  // "written" = line created/updated; "sold-out" = stock is gone (a fresh add
+  // is rejected; an existing line is left untouched for the checkout guard).
+  const upsertLine = async (): Promise<"written" | "sold-out"> => {
     // G-4: fresh product read per attempt — stock may have moved under contention.
     const current = await db.product.findUnique({ where: { id: input.productId }, select: { stock: true } });
     const stock = current?.stock ?? 0;
     const existing = await db.cartItem.findUnique({
       where: { cartId_productId_size: { cartId, productId: input.productId, size: input.size } },
     });
+    if (stock <= 0) {
+      // H-15 (session-5): the piece sold out mid-race. Never write a qty-1 line
+      // for it — starting a line is rejected; an existing line keeps its
+      // quantity (the checkout stock guard owns that conversation).
+      return existing ? "written" : "sold-out";
+    }
     if (existing) {
       const requestedQty = existing.quantity + input.quantity;
       await db.cartItem.update({ where: { id: existing.id }, data: { quantity: clampToStock(requestedQty, stock) } });
@@ -58,12 +72,16 @@ export async function addToCartAction(
         data: { cartId, productId: input.productId, size: input.size, quantity: clampToStock(input.quantity, stock) },
       });
     }
+    return "written";
   };
   const MAX_ATTEMPTS = 3;
   let lastError: unknown = null;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
-      await upsertLine();
+      const outcome = await upsertLine();
+      if (outcome === "sold-out") {
+        return fail("This piece is currently out of stock.");
+      }
       lastError = null;
       break;
     } catch (error) {
@@ -108,6 +126,9 @@ export async function adjustCartItemAction(
   const nextQty = item.quantity + parsedDelta.data.delta;
   if (nextQty <= 0) {
     await db.cartItem.delete({ where: { id: item.id } });
+  } else if (item.product.stock <= 0) {
+    // H-15 (session-5): stock is gone — leave the line untouched (the checkout
+    // stock guard surfaces it) instead of writing the clamp's 0.
   } else {
     const clamped = clampToStock(nextQty, item.product.stock);
     await db.cartItem.update({ where: { id: item.id }, data: { quantity: clamped } });

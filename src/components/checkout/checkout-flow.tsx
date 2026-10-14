@@ -274,7 +274,32 @@ export function CheckoutFlow({
                   </div>
                 </div>
                 {state && !state.ok && (
-                  <p className="text-xs text-red-600 font-montserrat" role="alert">{state.error.message}</p>
+                  <div className="flex flex-col gap-2" role="alert">
+                    <p className="text-xs text-red-600 font-montserrat">{state.error.message}</p>
+                    {/* H-5 (session-5): the action computes field-level errors
+                        (card fields are validated server-side at submit time,
+                        on this step) — render them, or "Check the highlighted
+                        fields" highlights nothing. */}
+                    {state.error.fieldErrors && (
+                      <ul className="text-xs text-red-600 font-montserrat list-disc pl-4">
+                        {Object.entries(state.error.fieldErrors).map(([field, message]) => (
+                          <li key={field}>
+                            <span className="capitalize">{field.replace(/([A-Z])/g, " $1")}</span>: {message}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {state.error.fieldErrors &&
+                      Object.keys(state.error.fieldErrors).some((f) => f.startsWith("card")) && (
+                        <button
+                          type="button"
+                          onClick={() => setStep(1)}
+                          className="text-xs font-montserrat text-muted-foreground underline underline-offset-4 hover:text-foreground w-fit"
+                        >
+                          Edit payment details
+                        </button>
+                      )}
+                  </div>
                 )}
                 <div className="flex gap-3">
                   <button type="button" onClick={() => setStep(1)} className="flex-1 border border-border text-xs tracking-[0.2em] uppercase py-4 hover:border-foreground transition-colors font-montserrat">

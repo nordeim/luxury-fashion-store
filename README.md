@@ -1,6 +1,6 @@
 # AURELIA — Luxury Fashion E-Commerce (VELOUR)
 
-![Next.js](https://img.shields.io/badge/Next.js-16.4-000000) ![React](https://img.shields.io/badge/React-19.3-61dafb) ![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20strict-3178c6) ![Tailwind](https://img.shields.io/badge/TailwindCSS-4.3-38bdf8) ![Prisma](https://img.shields.io/badge/Prisma-6.19-2D3748) ![Tests](https://img.shields.io/badge/tests-72%20unit%20%2B%2064%20e2e-brightgreen)
+![Next.js](https://img.shields.io/badge/Next.js-16.4-000000) ![React](https://img.shields.io/badge/React-19.3-61dafb) ![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20strict-3178c6) ![Tailwind](https://img.shields.io/badge/TailwindCSS-4.3-38bdf8) ![Prisma](https://img.shields.io/badge/Prisma-6.19-2D3748) ![Tests](https://img.shields.io/badge/tests-77%20unit%20%2B%2090%20e2e-brightgreen)
 
 A production-grade luxury fashion storefront + admin console — a **functional superset** of the reference prototype `pastel-aurelia-fashion-edit.base44.app` with resting-state visual parity: full catalog, cart, guest+member checkout, wishlist, customer accounts, and a role-gated admin, where the reference shipped inert buttons and two pages.
 
@@ -10,13 +10,13 @@ A production-grade luxury fashion storefront + admin console — a **functional 
 
 ## Overview
 
-The reference site is a polished **visual prototype**: working login, cart drawer and search overlay — but every commerce action (`Add to Bag`, category cards, wishlist) is inert, and every catalog route 404s. This codebase reproduces its look (measured computed styles: Cormorant Garamond + Montserrat, warm-paper palette, gold accents, `w-80` mobile drawer with `flex gap-5` stacking) on a real architecture — Next.js 16 App Router, server actions as the single mutation seam, Prisma/SQLite persistence, scrypt+session auth — and makes every interaction real.
+The reference site is a polished **visual prototype**: working login, cart drawer and search overlay — but every commerce action (`Add to Bag`, category cards, wishlist) is inert, and every catalog route 404s. This codebase reproduces its look (measured computed styles: Cormorant Garamond + Montserrat, warm-paper palette, gold accents, per-slide left/right-anchored hero with a horizontal push transition, the brand marquee strip, fixed 280px product-row cards, `w-80` mobile drawer with `flex gap-5` stacking) on a real architecture — Next.js 16 App Router, server actions as the single mutation seam, Prisma/SQLite persistence, scrypt+session auth — and makes every interaction real.
 
 ## Key Features
 
 | Feature | Description |
 |---|---|
-| Home (12 sections) | Hero carousel, The Edit, product rows, exclusive deals, UGC — reference order + copy |
+| Home (13 sections) | Hero carousel (left/right-anchored slides), brand marquee, The Edit, product rows, exclusive deals, UGC — reference order + copy |
 | Shop (PLP) | Working category chips, price buckets, sort, sale filter, search, URL sync (reference `/shop` 404s) |
 | Product detail | Gallery, size/color chips, quantity stepper, live stock, related row, JSON-LD (reference has no PDP) |
 | Cart | Drawer + full page, server-truth totals, guest carts (192-bit cookie token) merged at login |
@@ -38,7 +38,7 @@ The reference site is a polished **visual prototype**: working login, cart drawe
 | ORM / DB | Prisma + SQLite | 6.19.3 | 13 models, single-file DB at `db/custom.db` |
 | Auth | Custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 | Validation | Zod | 3.25.76 | Every seam (forms, actions, admin updates) |
-| Testing | Vitest 3.2.7 + Playwright 1.64.0 | — | 72 unit + 64 E2E (chromium + mobile) |
+| Testing | Vitest 3.2.7 + Playwright 1.64.0 | — | 77 unit + 45 E2E cases × 2 device projects |
 
 ```text
 Browser ── RSC pages (force-dynamic)
@@ -73,13 +73,13 @@ Demo accounts (printed on `/login` in development only — hidden in production 
 ## Testing
 
 ```bash
-npm run verify        # typecheck → lint → vitest (72) → production build
-npm run test:e2e      # Playwright: boots the production standalone (build FIRST — 64 E2E + 2 setup)
+npm run verify        # typecheck → lint → vitest (77) → production build
+npm run test:e2e      # Playwright: boots the production standalone (build FIRST — 45 cases × 2 projects, +2 setup)
 npx playwright test tests/e2e/mobile-navigation.spec.ts   # single spec
 npx vitest run src/lib/money.test.ts                      # single unit file
 ```
 
-The E2E suite boots the **production standalone** on `:3100` against its own `db/e2e.db`; run `npm run build` first whenever source changed. Mobile coverage runs the same Chromium engine on the iPhone 14 profile.
+The E2E suite boots the **production standalone** on `:3100` against its own `db/e2e.db`; run `npm run build` first whenever source changed. Mobile coverage runs the same Chromium engine on the iPhone 14 profile (the one desktop-only geometry pin skips there). Global setup re-seeds the scratch DB **and wipes transient state** (carts/wishlists/sessions) so every run starts canonical.
 
 ## Environment Variables
 
@@ -97,7 +97,7 @@ PORT=3000 NODE_ENV=production AUTH_SECRET=<secret> DATABASE_URL="file:<absolute>
   node .next/standalone/server.js
 ```
 
-`output: "standalone"` emits a self-contained server; the build's assemble step copies `.next/static` + `public/` into it (the step the Next.js docs require). On a real deployment pass an **absolute** `DATABASE_URL` — file tracing copies `prisma/schema.prisma` into the bundle, which would re-anchor a relative URL to a nonexistent `<bundle>/db/` path. Security headers (Referrer-Policy, nosniff, HSTS, `X-Frame-Options: DENY`) ship from `next.config.ts`.
+`output: "standalone"` emits a self-contained server; the build's assemble step copies `.next/static` + `public/` into it (the step the Next.js docs require). On a real deployment pass an **absolute** `DATABASE_URL` — file tracing copies `prisma/schema.prisma` into the bundle, which would re-anchor a relative URL to a nonexistent `<bundle>/db/` path. Security headers (Referrer-Policy, nosniff, HSTS, `X-Frame-Options: DENY`) ship from `next.config.ts`. If you set `TRUST_PROXY=1`, the proxy must **overwrite** (not append) `x-forwarded-for` — the rate limiter reads the first hop.
 
 ## Project Status
 
@@ -106,7 +106,7 @@ PORT=3000 NODE_ENV=production AUTH_SECRET=<secret> DATABASE_URL="file:<absolute>
 | Reference recon (computed-style spec) | ✅ | `recon` artifacts + measured pins |
 | Transformation to Next.js 16 | ✅ | Vite SPA lineage archived in `docs/legacy-homenest/` |
 | Functional superset (PLP/PDP/cart/checkout/account/admin) | ✅ | All commerce paths live |
-| Test suites (vitest + playwright) | ✅ | 72 unit · 64 E2E + 2 setup, all green |
+| Test suites (vitest + playwright) | ✅ | 77 unit · 45 E2E × 2 + 2 setup, all green |
 | Docs (AGENTS/CLAUDE/README/PAD + distilled SKILL.md) | ✅ | This release |
 
 ## License

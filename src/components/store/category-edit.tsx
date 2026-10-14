@@ -1,9 +1,10 @@
 "use client";
 
 // "The Edit" category cards — parity surface: 4-col grid (2-col mobile),
-// aspect ~4/5 image cards with bottom gradient, serif label, "N pieces",
-// "Shop Now →". Links to /shop?category=… (working superset; the reference
-// card handlers are inert).
+// aspect-[3/4] image cards (re-measured live 2026-10-14, P-5 session-5:
+// 302×403 = 3:4; the old aspect-[4/5] rendered the section 25px short) with
+// bottom gradient, serif label, "N pieces", "Shop Now →". Links to
+// /shop?category=… (working superset; the reference card handlers are inert).
 
 import Link from "next/link";
 import { CATEGORY_CARDS } from "@/lib/data/catalog";
@@ -23,7 +24,7 @@ export function CategoryEdit() {
             <Link
               key={card.id}
               href={`/shop?category=${card.id}`}
-              className="group relative overflow-hidden aspect-[4/5] block"
+              className="group relative overflow-hidden aspect-[3/4] block"
             >
               { }
               <img

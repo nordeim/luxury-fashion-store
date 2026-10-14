@@ -30,4 +30,22 @@ export default function globalSetup() {
   fs.mkdirSync(path.join(repoRoot, "db"), { recursive: true });
   run("npx", ["prisma", "db", "push", "--accept-data-loss", "--skip-generate"]);
   run("npx", ["tsx", "prisma/seed.ts"]);
+  // Session 5: reset TRANSIENT runtime state. The seed is idempotent
+  // (upserts) but never removes rows created AFTER it — a previous run's
+  // guest carts merged into the demo user made the next run's drawer specs
+  // see two lines. Every run starts from the canonical catalog/user/order
+  // state with empty bags, wishlists, and sessions.
+  const wipe = [
+    `DELETE FROM "CartItem";`,
+    `DELETE FROM "Cart";`,
+    `DELETE FROM "WishlistItem";`,
+    `DELETE FROM "Wishlist";`,
+    `DELETE FROM "Session";`,
+    `DELETE FROM "Address" WHERE "label" LIKE 'E2E%';`,
+    `DELETE FROM "User" WHERE "email" LIKE 'e2e-%@example.com';`,
+    `DELETE FROM "Order" WHERE "number" LIKE 'ORD-9999-%';`,
+  ].join("\n");
+  const wipeFile = path.join(repoRoot, "db", ".e2e-wipe.sql");
+  fs.writeFileSync(wipeFile, wipe);
+  run("npx", ["prisma", "db", "execute", "--schema", "prisma/schema.prisma", "--file", "db/.e2e-wipe.sql"]);
 }

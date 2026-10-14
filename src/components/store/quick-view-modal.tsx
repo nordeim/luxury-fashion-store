@@ -20,6 +20,8 @@ export function QuickViewModal({ product, onClose }: { product: ProductCardData 
   const [size, setSize] = useState<string>("");
   const [isPending, startTransition] = useTransition();
   const [sizedForId, setSizedForId] = useState<string | null>(null);
+  // H-6 (session-5): action failures surface here, not as silent no-ops.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Reset the size selection when a different product opens (adjust-during-render —
   // no effect needed; React re-renders immediately after this setState).
@@ -50,9 +52,12 @@ export function QuickViewModal({ product, onClose }: { product: ProductCardData 
     startTransition(async () => {
       const res = await addToCartAction(product.id, size, 1);
       if (res.ok) {
+        setActionError(null);
         setCart(res.data);
         onClose();
         setCartOpen(true);
+      } else {
+        setActionError(res.error.message);
       }
     });
   };
@@ -68,6 +73,8 @@ export function QuickViewModal({ product, onClose }: { product: ProductCardData 
           else next.delete(product.id);
           return next;
         });
+      } else {
+        setActionError(res.error.message);
       }
     });
   };
@@ -119,6 +126,11 @@ export function QuickViewModal({ product, onClose }: { product: ProductCardData 
             </div>
           )}
           <div className="mt-auto flex flex-col gap-3">
+            {actionError && (
+              <p className="text-xs text-red-600 font-montserrat" role="alert">
+                {actionError}
+              </p>
+            )}
             <button
               type="button"
               onClick={addToBag}

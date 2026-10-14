@@ -4,7 +4,7 @@
 
 import { Minus, Plus, Trash2, ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useStore } from "@/components/store/store-provider";
 import { adjustCartItemAction, removeCartItemAction } from "@/lib/actions/cart";
 import { formatCents, FREE_SHIPPING_THRESHOLD_CENTS } from "@/lib/money";
@@ -12,17 +12,29 @@ import { formatCents, FREE_SHIPPING_THRESHOLD_CENTS } from "@/lib/money";
 export function CartPageClient() {
   const { cart, setCart } = useStore();
   const [isPending, startTransition] = useTransition();
+  // H-6 (session-5): mutation failures surface here instead of vanishing.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const adjust = (itemId: string, delta: number) => {
     startTransition(async () => {
       const res = await adjustCartItemAction(itemId, delta);
-      if (res.ok) setCart(res.data);
+      if (res.ok) {
+        setActionError(null);
+        setCart(res.data);
+      } else {
+        setActionError(res.error.message);
+      }
     });
   };
   const remove = (itemId: string) => {
     startTransition(async () => {
       const res = await removeCartItemAction(itemId);
-      if (res.ok) setCart(res.data);
+      if (res.ok) {
+        setActionError(null);
+        setCart(res.data);
+      } else {
+        setActionError(res.error.message);
+      }
     });
   };
 
@@ -52,6 +64,11 @@ export function CartPageClient() {
         ) : (
           <div className="grid lg:grid-cols-3 gap-12">
             <div className="lg:col-span-2">
+              {actionError && (
+                <p className="text-xs text-red-600 font-montserrat mb-4" role="alert">
+                  {actionError}
+                </p>
+              )}
               {toFreeShipping > 0 && (
                 <p className="text-xs font-montserrat text-muted-foreground mb-6">
                   You&apos;re {formatCents(toFreeShipping)} away from complimentary shipping.

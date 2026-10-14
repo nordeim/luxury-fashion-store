@@ -10,7 +10,7 @@
 
 import { X, ShoppingBag, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useStore } from "@/components/store/store-provider";
 import { adjustCartItemAction, removeCartItemAction } from "@/lib/actions/cart";
 import { formatCents } from "@/lib/money";
@@ -18,6 +18,9 @@ import { formatCents } from "@/lib/money";
 export function CartDrawer() {
   const { cart, cartOpen, setCartOpen, setCart } = useStore();
   const [isPending, startTransition] = useTransition();
+  // H-6 (session-5): mutation failures (vanished line, ownership) surface
+  // here instead of leaving stale UI silently in place.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!cartOpen) return;
@@ -37,14 +40,24 @@ export function CartDrawer() {
   const adjust = (itemId: string, delta: number) => {
     startTransition(async () => {
       const res = await adjustCartItemAction(itemId, delta);
-      if (res.ok) setCart(res.data);
+      if (res.ok) {
+        setActionError(null);
+        setCart(res.data);
+      } else {
+        setActionError(res.error.message);
+      }
     });
   };
 
   const remove = (itemId: string) => {
     startTransition(async () => {
       const res = await removeCartItemAction(itemId);
-      if (res.ok) setCart(res.data);
+      if (res.ok) {
+        setActionError(null);
+        setCart(res.data);
+      } else {
+        setActionError(res.error.message);
+      }
     });
   };
 
@@ -79,6 +92,11 @@ export function CartDrawer() {
         </div>
 
         <div className="flex-1 overflow-y-auto py-4 px-6 flex flex-col gap-5">
+          {actionError && (
+            <p className="text-xs text-red-600 font-montserrat" role="alert">
+              {actionError}
+            </p>
+          )}
           {cart.lines.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center gap-4">
               <div className="w-16 h-16 border-2 border-border rounded-full flex items-center justify-center">
