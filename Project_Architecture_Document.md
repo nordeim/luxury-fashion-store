@@ -202,7 +202,7 @@ luxury-fashion-store/
         ├── auth.ts             ← scrypt, sessions, SafeUser, strict authSecret()
         ├── actions/            ← auth, cart, wishlist, checkout, account, admin ("use server")
         ├── action-result.ts    ← { ok, data | error{message, fieldErrors} } envelope
-        ├── validation.ts       ← Zod schemas + validateRedirectPath + isLuhnValid
+        ├── validation.ts       ← Zod schemas + sizeAllowed allowlist + validateRedirectPath + isLuhnValid
         ├── rate-limit.ts       ← in-memory fixed-window limiter (TRUST_PROXY-gated client IP)
         ├── order-token.ts      ← HMAC guest order-view capability tokens (authSecret()-backed)
         ├── address.ts          ← schema-checked shipping-address parser (no raw JSON.parse)
@@ -407,11 +407,11 @@ Hero crossfade `transition-opacity duration-700`, auto-rotate 5000ms; drawers/ov
 
 | Category | Files | Tests | Location | Framework |
 |---|---|---|---|---|
-| Unit (pure seams) | 14 | 109 | `src/lib/*.test.ts` | Vitest (node) |
+| Unit (pure seams) | 14 | 113 | `src/lib/*.test.ts` | Vitest (node) |
 | E2E setup | 1 | 1×2 projects | `tests/e2e/auth.setup.ts` | Playwright |
-| E2E functional | 9 | 60 cases × 2 profiles (118 passed + 2 desktop-only skips on mobile) | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
+| E2E functional | 9 | 63 cases × 2 profiles (126 passed + 2 desktop-only skips on mobile) | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
 
-E2E coverage map: home (hero **per-slide anchoring incl. slide-3 center (P-8) + push transition + brand marquee (P-1..P-3 pins)**/sections incl. **the P-9 composite deals: live countdown (format + two-transition tick (H-51) + 3×48px ink boxes + right-stacked P-14 header row), bento headings + aspect/stretch geometry (H-55), 4-equal-column sale grid**/**P-10/P-11 card stack pins: name, 16px stroke stars, swatches, SIZE chips, red-500 discount chip, no NEW chip**/**P-13 fixed 260/280px cards + gap-24 at every breakpoint**/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related/**quick-view focus trap (H-43)**) · cart+checkout (drawer steppers, empty state, totals, **double-remove races emit no 5xx (H-23)**, **drawer focus trap (H-26)**, **sold-out adjust guard (H-39)**, COD end-to-end, **card path incl. visible field errors (H-5)**, **guest→user cart merge at login (H-21 pin, cleans up after itself)**) · auth (login card, wrong-password alert, register validation, **register happy path (H-8)**, logout) · **account addresses (add/edit-prefill/update/set-default/delete — the H-4 remount pin)** · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px, stacking, navigation, Escape/backdrop close, focus trap — H-26; P-12: exactly the five reference menus, no tail)** · admin (role gate + console pages + **dashboard KPI floors + Revenue-excludes-cancelled semantics (H-28)**; real mutation flows: order status/carrier set/clear; **orders take-cap COUNT pin (H-2, injects 104 cancelled rows)**; **product stock → storefront sellout path (H-7/H-15)**; **visibility toggle → /shop (H-7)**).
+E2E coverage map: home (hero **per-slide anchoring incl. slide-3 center (P-8) + push transition + brand marquee (P-1..P-3 pins)**/sections incl. **the P-9 composite deals: live countdown (format + two-transition tick (H-51) + 3×48px ink boxes + right-stacked P-14 header row), bento headings + aspect/stretch geometry (H-55), 4-equal-column sale grid**/**P-10/P-11 card stack pins: name, 16px stroke stars, swatches, SIZE chips (resting state + labels — H-57), red-500 discount chip, no NEW chip**/**P-15 card names render the display serif + mobile sale-grid names fit one line**/**P-13 fixed 260/280px cards + gap-24 at every breakpoint + View All hidden below lg (H-58)**/newsletter) · shop (filters/sort/sale/search/clear) · product (gallery/chips/steppers/drawer/related/**quick-view focus trap (H-43)**) · cart+checkout (drawer steppers, empty state, totals, **double-remove races emit no 5xx (H-23)**, **drawer focus trap (H-26)**, **sold-out adjust guard (H-39)**, **card chip selection drives the posted size (H-57b)**, COD end-to-end, **card path incl. visible field errors (H-5)**, **guest→user cart merge at login (H-21 pin, cleans up after itself)**) · auth (login card, wrong-password alert, register validation, **register happy path (H-8)**, logout) · **account addresses (add/edit-prefill/update/set-default/delete — the H-4 remount pin)** · wishlist (PDP toggle → page) · **mobile navigation (v4-trap geometry pins: 320px panel, flex gap 20px — pinned to the measured 19–21px band (H-62), stacking, navigation, Escape/backdrop close, focus trap — H-26; P-12: exactly the five reference menus, no tail)** · admin (role gate + console pages + **dashboard KPI floors + Revenue-excludes-cancelled semantics (H-28)**; real mutation flows: order status/carrier set/clear; **orders take-cap COUNT pin (H-2, injects 104 cancelled rows)**; **product stock → storefront sellout path (H-7/H-15)**; **visibility toggle → /shop (H-7)**). The H-59 bag-size allowlist is pinned at the pure seam (`sizeAllowed`, 4 unit cases) — UI surfaces cannot post a foreign size, so no E2E drives the rejection (disclosed in the session-9 plan §6).
 
 ### 7.2 Test Patterns
 
@@ -422,8 +422,8 @@ E2E coverage map: home (hero **per-slide anchoring incl. slide-3 center (P-8) + 
 ### 7.3 Pre-Deploy Checklist
 
 ```bash
-npm run verify      # typecheck → lint → 109 unit → production build (+ standalone assembly)
-npm run test:e2e    # 60 cases × 2 projects (+2 setup); requires the fresh build
+npm run verify      # typecheck → lint → 113 unit → production build (+ standalone assembly)
+npm run test:e2e    # 63 cases × 2 projects (+2 setup); requires the fresh build
 ```
 
 Both green = shippable. `npm run build` must re-run after ANY source change before E2E (the suite tests the built artifact, not dev).

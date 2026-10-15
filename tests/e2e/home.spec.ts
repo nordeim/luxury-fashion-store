@@ -308,7 +308,7 @@ test.describe("home", () => {
     }
   });
 
-  test("product cards render a size-chip row under the swatches (P-11)", async ({ page }) => {
+  test("product cards render a size-chip row under the swatches (P-11, strengthened H-57)", async ({ page }) => {
     await page.goto("/");
     const card = page.getByTestId("product-row").first().locator("[data-product-card]").first();
     await expect(card).toBeVisible();
@@ -318,27 +318,97 @@ test.describe("home", () => {
       const buttons = Array.from(el.querySelectorAll(".flex-wrap button"));
       return buttons.map((b) => {
         const cs = getComputedStyle(b);
-        return { label: b.textContent?.trim() ?? "", fs: cs.fontSize, padY: cs.paddingTop, border: cs.borderTopWidth, radius: cs.borderRadius, bg: cs.backgroundColor };
+        return { label: b.textContent?.trim() ?? "", fs: cs.fontSize, padY: cs.paddingTop, border: cs.borderTopWidth, radius: cs.borderRadius, bg: cs.backgroundColor, borderColor: cs.borderTopColor };
       });
     });
     // P-11: the reference renders ONE bordered chip per product size
-    // ("One Size" for the bag) — 10px, py-1, 1px border, square.
+    // ("One Size" for the bag) — 10px, py-1, 1px border, square, and the
+    // labels are the product's size list (H-57: labels + count pinned, not
+    // just "at least one").
     expect(chips.length).toBeGreaterThanOrEqual(1);
+    const labels = chips.map((c) => c.label);
+    for (const label of labels) expect(label.length).toBeGreaterThan(0);
+    expect(new Set(labels).size).toBe(labels.length); // one chip per distinct size
     for (const chip of chips) {
       expect(chip.fs).toBe("10px");
       expect(parseFloat(chip.padY)).toBe(4);
       expect(chip.border).toBe("1px");
       expect(parseFloat(chip.radius)).toBe(0);
+      expect(chip.bg).toBe("rgba(0, 0, 0, 0)"); // transparent — H-57: bg pinned
     }
+    // H-57: the RESTING state has NO selection — every chip shares one
+    // border color and it is NOT the foreground (selected) token. A build
+    // that default-selects a chip at rest fails here (the old "color flips
+    // on click" assertion passed either way).
+    const resting = await card.evaluate((el) => {
+      const probe = document.createElement("span");
+      probe.className = "border-foreground";
+      probe.style.display = "none";
+      document.body.appendChild(probe);
+      const selected = getComputedStyle(probe).borderTopColor;
+      probe.remove();
+      const buttons = Array.from(el.querySelectorAll(".flex-wrap button"));
+      return { selected, borders: buttons.map((b) => getComputedStyle(b).borderTopColor) };
+    });
+    expect(new Set(resting.borders).size).toBe(1); // uniform muted chips at rest
+    expect(resting.borders[0]).not.toBe(resting.selected);
     // Superset: clicking a chip selects the size the card's Add to Bag posts
-    // (selected state = border-foreground). Resting visuals have NO
-    // selection — matching the reference's uniform muted chips.
+    // (selected state = border-foreground) — and ONLY that chip flips.
     const first = card.locator(".flex-wrap button").first();
-    const before = await first.evaluate((el) => getComputedStyle(el).borderTopColor);
+    const before = resting.borders[0];
     await first.click();
     await expect
       .poll(() => first.evaluate((el) => getComputedStyle(el).borderTopColor), { timeout: 5_000 })
       .not.toBe(before); // React re-render timing — poll, don't race
+    const after = await card.evaluate((el) => {
+      const buttons = Array.from(el.querySelectorAll(".flex-wrap button"));
+      return buttons.map((b) => getComputedStyle(b).borderTopColor);
+    });
+    expect(after.filter((c) => c !== before).length).toBe(1); // exactly one selected
+  });
+
+  test("card names render the display serif (P-15 — the reference's heading rule)", async ({ page }) => {
+    await page.goto("/");
+    const name = page.getByTestId("product-row").first().locator("[data-product-card] h3").first();
+    await expect(name).toBeVisible();
+    // The reference maps EVERY heading (h1/h2/h3 — card names included) to
+    // Cormorant Garamond; its non-heading font-body elements are Montserrat.
+    // The clone's Montserrat card name wrapped at the 163px mobile sale-grid
+    // tiles (P-15's observable consequence) while the reference's fit one line.
+    const ff = await name.evaluate((el) => getComputedStyle(el).fontFamily);
+    expect(ff).toContain("Cormorant");
+  });
+
+  test("sale-grid tile names fit ONE line at the 163px mobile tile (P-15 geometric consequence)", async ({ page }) => {
+    await page.goto("/");
+    const deals = page.getByTestId("exclusive-deals");
+    const name = deals.locator("[data-testid=sale-grid] h3").first();
+    await expect(name).toBeVisible();
+    // 14px/500 name: one line box = ~19px. The Montserrat name wrapped to
+    // two lines (39px) at the narrow mobile tile — the +61px deals drift.
+    await expect
+      .poll(async () => name.evaluate((el) => Math.round(el.getBoundingClientRect().height)))
+      .toBeLessThanOrEqual(20);
+  });
+
+  test("row-header View All hides below lg (P-13 sub-claim, H-58)", async ({ page }) => {
+    await page.goto("/");
+    // The product-row testid sits on the SCROLLER; the View All link lives in
+    // the sibling header. Scope to the row section containing the scroller.
+    const section = page.locator("section", { has: page.getByTestId("product-row") }).first();
+    // display:none links leave the accessibility tree — locate by text, not
+    // by role (a getByRole locator times out on the hidden mobile state).
+    const viewAll = section.locator("a", { hasText: "View All" }).first();
+    await expect(viewAll).toHaveCount(1);
+    const width = page.viewportSize()?.width ?? 0;
+    const display = await viewAll.evaluate((el) => getComputedStyle(el).display);
+    if (width >= 1024) {
+      expect(display).not.toBe("none");
+    } else {
+      // The reference hides View All on mobile (display:none measured @390 —
+      // a visible link wrapped the row header to 103-118px vs the uniform 63px).
+      expect(display).toBe("none");
+    }
   });
 
   test("sale grid is four equal fluid columns at desktop (P-9)", async ({ page }) => {

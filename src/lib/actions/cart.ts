@@ -10,7 +10,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { getCartDto, getOrCreateCart, type CartDto } from "@/lib/cart";
-import { cartAddSchema, cartDeltaSchema } from "@/lib/validation";
+import { cartAddSchema, cartDeltaSchema, sizeAllowed } from "@/lib/validation";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { isRecordNotFound, isUniqueViolation } from "@/lib/prisma-errors";
 import { planAdjustment, planCorrection } from "@/lib/adjust-plan";
@@ -60,6 +60,13 @@ export async function addToCartAction(
   }
   if (product.stock <= 0) {
     return fail("This piece is currently out of stock.");
+  }
+  // H-59 (session-9): the size must belong to the product's own list — P-11
+  // made size a user-clicked input on every card, so the schema-only cap
+  // (≤20 chars) is no longer the whole story. Unparseable/empty catalog data
+  // stays unconstrained (sizeAllowed), never bricking the bag.
+  if (!sizeAllowed(product.sizes, input.size)) {
+    return fail("Invalid bag request.");
   }
   const cartId = await getOrCreateCart(user?.id ?? null);
 
@@ -169,6 +176,15 @@ export async function adjustCartItemAction(
       stockForWrite = freshPre?.stock ?? 0;
     }
     const plan = planAdjustment(parsedDelta.data.delta, stockForWrite);
+    // H-56 (session-9): a skip plan is a TRUE no-op — the docstring always
+    // claimed "no UPDATE + no parent touch + no revalidate"; the executor now
+    // honors it. Nothing was written, so the sweeper's idle>30d predicate
+    // (H-42) must not see a fresh `updatedAt`, and the router cache holds
+    // nothing stale (all routes are force-dynamic; the client re-syncs from
+    // the response DTO below).
+    if (plan.kind === "skip") {
+      return ok(await getCartDto(user?.id ?? null));
+    }
     if (plan.kind === "increment") {
       const updated = await db.cartItem.update({
         where: { id: item.id },

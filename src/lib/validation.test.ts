@@ -10,6 +10,7 @@ import {
   loginSchema,
   orderStatusSchema,
   registerSchema,
+  sizeAllowed,
   validateRedirectPath,
   wishlistMutationSchema,
 } from "./validation";
@@ -170,5 +171,28 @@ describe("isLuhnValid (demo card verification)", () => {
     expect(isLuhnValid("4242 4242 4242 4241")).toBe(false);
     expect(isLuhnValid("42424242")).toBe(false);
     expect(isLuhnValid("abcd efgh")).toBe(false);
+  });
+});
+
+describe("sizeAllowed (H-59 — the bag-size allowlist seam)", () => {
+  it("accepts a size the product actually offers", () => {
+    expect(sizeAllowed('["XS","S","M","L"]', "M")).toBe(true);
+    expect(sizeAllowed('["One Size"]', "One Size")).toBe(true);
+  });
+
+  it("rejects a foreign size (crafted server-action variant)", () => {
+    expect(sizeAllowed('["XS","S","M","L"]', "XXL")).toBe(false);
+    expect(sizeAllowed('["XS","S","M","L"]', "")).toBe(false);
+  });
+
+  it("is unconstrained when the catalog carries no usable size list", () => {
+    expect(sizeAllowed("[]", "M")).toBe(true); // empty list — nothing to check against
+    expect(sizeAllowed("not-json", "M")).toBe(true); // malformed legacy data — never brick the bag
+    expect(sizeAllowed('{"a":1}', "M")).toBe(true); // non-array junk — unconstrained
+  });
+
+  it("ignores non-string entries instead of rejecting the whole list", () => {
+    expect(sizeAllowed('["XS", 5, null]', "XS")).toBe(true);
+    expect(sizeAllowed('["XS", 5, null]', "M")).toBe(false);
   });
 });

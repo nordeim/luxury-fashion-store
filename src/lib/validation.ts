@@ -40,6 +40,27 @@ export const registerSchema = z
     path: ["confirmPassword"],
   });
 
+/**
+ * H-59 (session-9): the bag-size allowlist seam. `product.sizes` is a
+ * JSON-string column; a crafted server-action call used to be able to persist
+ * ANY ≤20-char string as a bag variant (cartAddSchema enforces only the shape).
+ * P-11 made size a user-clicked input on every card, so the seam is validated
+ * against the product's own list now. Unparseable/empty/non-array data is
+ * treated as UNCONSTRAINED — corrupt catalog rows must never brick the bag.
+ */
+export function sizeAllowed(productSizesJson: string, requested: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(productSizesJson);
+  } catch {
+    return true;
+  }
+  if (!Array.isArray(parsed)) return true;
+  const list = parsed.filter((s): s is string => typeof s === "string");
+  if (list.length === 0) return true;
+  return list.includes(requested);
+}
+
 export const cartAddSchema = z.object({
   productId: z.string().min(1),
   size: z.string().max(20).default(""),

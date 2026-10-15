@@ -34,6 +34,30 @@ async function emptyTheBag(page: import("@playwright/test").Page) {
 }
 
 test.describe("cart + checkout", () => {
+  test("card size-chip selection drives the posted size (H-57b — the P-11 behavioral half)", async ({ page }) => {
+    // Home row card (Cashmere Overcoat: XS S M L). Click the SECOND chip —
+    // the card's Add to Bag must post THAT size, proving the selectable
+    // superset end-to-end (the old pins proved only the visual flip).
+    await page.goto("/");
+    const card = page.getByTestId("product-row").first().locator("[data-product-card]").first();
+    await expect(card).toBeVisible();
+    const chips = card.locator(".flex-wrap button");
+    const chipCount = await chips.count();
+    expect(chipCount).toBeGreaterThanOrEqual(2);
+    const wanted = ((await chips.nth(1).textContent()) ?? "").trim();
+    await chips.nth(1).click();
+    await expect
+      .poll(() => chips.nth(1).evaluate((el) => getComputedStyle(el).borderTopColor), { timeout: 5_000 })
+      .not.toBe(await chips.nth(0).evaluate((el) => getComputedStyle(el).borderTopColor));
+    // Hover-revealed action row: Playwright's click auto-hovers.
+    await card.getByRole("button", { name: "Add to Bag" }).click();
+    await expect(page.getByTestId("cart-drawer")).toBeVisible();
+    // The drawer line must carry the CLICKED size (server truth), not sizes[0].
+    await expect(page.getByTestId("cart-drawer").getByText(`Size: ${wanted}`)).toBeVisible();
+    // Within-run residue rule: this spec cleans up after itself.
+    await emptyTheBag(page);
+  });
+
   test("drawer steppers mutate the line (server truth)", async ({ page }) => {
     await openDrawerWithItem(page);
     const qty = page.getByTestId(/^qty-/).first();

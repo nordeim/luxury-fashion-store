@@ -1,10 +1,10 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.3.0
+version: 1.4.0
 last_updated: 2026-10-15
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
-project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 109/109 unit (14 files) ✓ build ✓ E2E 118 passed + 2 skipped (60 unique cases × chromium+mobile, two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
+project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 113/113 unit (14 files) ✓ build ✓ E2E 126 passed + 2 skipped (63 unique cases × chromium+mobile, two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
 reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only prototype (inert commerce buttons). This repo is its functional superset with resting-state visual parity."
 ---
 
@@ -72,7 +72,10 @@ typography. Functional additions may extend those surfaces, never restyle them.
   COLOR SWATCHES (w-4 h-4 border chips; no "NEW" chip) / **SIZE CHIPS** (one
   bordered button per product size — text-[10px] px-2.5 py-1, square,
   transparent bg; P-11). Sale cards carry a -{discount}% red-500 chip on the
-  image (P-10). Product rows use FIXED-width cards at every breakpoint
+  image (P-10). **Card NAMES render in Cormorant Garamond (P-15): the
+  reference maps EVERY heading rank — h1/h2/h3, card-name h3s included — to
+  the display serif; its non-heading font-body elements (brand, price, chips)
+  are Montserrat.** Product rows use FIXED-width cards at every breakpoint
   (260px below lg, 280px at lg+, gap-6 throughout — P-13; "View All" hides
   below lg), and the row-header kicker sits mb-2 (8px).
 
@@ -90,8 +93,8 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | Styling | Tailwind CSS (CSS-first `@theme`) | 4.3.3 | v4 traps — see §9 #1–#2 |
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
-| Unit tests | Vitest (node env) | 3.2.7 | 109 tests in `src/lib/*.test.ts` (14 files) |
-| E2E | Playwright (standalone server) | 1.64.0 | 60 unique cases × 2 device projects (+2 setup) |
+| Unit tests | Vitest (node env) | 3.2.7 | 113 tests in `src/lib/*.test.ts` (14 files) |
+| E2E | Playwright (standalone server) | 1.64.0 | 63 unique cases × 2 device projects (+2 setup) |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -411,6 +414,20 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
     "getSnapshot should be cached" warning / re-render loop. The countdown
     store caches its formatted string PER TICK — invalidated on each interval
     fan-out and on re-arm (session 8, H-49).
+26. **[CRITICAL] Typography drift hides behind short names — pin font
+    FAMILIES on pinned faces, not just geometry.** The reference's base CSS
+    maps EVERY heading rank (`h1`/`h2`/`h3` — card-name h3s included) to the
+    display serif; its `font-body` utility resolves to Montserrat for
+    non-heading elements (brand, price, size chips). The clone's card names
+    shipped as Montserrat and NO geometry pin noticed at desktop — short
+    catalog names fit one line in BOTH fonts at 260–280px, so the card
+    stacks coincided byte-for-byte. The drift surfaced only at the 163px
+    mobile sale-grid tiles ("Silk Draped Evening Gown" wrapped to two lines
+    → +61px on the deals section) and was MIS-CLASSIFIED as catalog data
+    variance for a full session (session 8's accepted note). The fix is one
+    class (`font-sans` → `font-cormorant` on the card-name h3, session 9,
+    P-15). Ritual addition: in every parity sweep, census computed
+    `fontFamily` per heading rank on BOTH sides alongside the height census.
 
 ## §10 Debugging Guide (symptom → cause → fix)
 
@@ -444,8 +461,8 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
 ## §11 Pre-Ship Checklist
 
 ```bash
-npm run verify                      # typecheck → lint → 109 unit → build (+ assemble)
-npm run test:e2e                    # 60 cases × 2 projects (+2 setup; build FIRST — §9 #16)
+npm run verify                      # typecheck → lint → 113 unit → build (+ assemble)
+npm run test:e2e                    # 63 cases × 2 projects (+2 setup; build FIRST — §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present (no unsafe-eval in prod)
 
 # Parity pins
@@ -504,15 +521,22 @@ suites; no `db/*.db` staged; commit goes to `main` only.
     had REBUILT the Exclusive Deals section and the product-card text stack —
     the drift hid in surfaces nobody had pinned, and a 5-minute SECTION-HEIGHT
     census (total 11079 vs clone 8771) is what exposed a 2308px divergence.
-    Ritual: height census → pinned-surface re-measure → pin whatever you
-    measured, so the next drift is a red test, not a surprise. Session 8
+    Ritual: height census → **font-family census per heading rank (session 9:
+    the ONE drift that survived two full sweeps hid in a typography face
+    nobody had pinned — the card-name h3 was Montserrat while the reference
+    renders every heading in the display serif; it had been mis-classified
+    as catalog data variance)** → pinned-surface re-measure → pin whatever
+    you measured, so the next drift is a red test, not a surprise. Session 8
     validated the ritual: the census caught FOUR drifts in one sweep (size
     chips on every card, the drawer tail removed, mobile card geometry
     reverted to fixed 260px, the deals header merged) — all in never-pinned
     or structurally-underpinned surfaces. Also: a data-driven delta (the
     reference renaming/shortening a product name, changing wrap heights) is
     CONTENT drift — accept and document it; pin STRUCTURE, not catalog
-    copy.
+    copy. **But classify before accepting: session 8 accepted a +61px
+    mobile-deals delta as "content drift" that was actually a font-family
+    drift (P-15) — measure the reference's own rendering of the SAME text
+    before accepting a variance as data-driven.**
 
 ## §13 Pitfalls to Avoid (the "don't" list)
 
@@ -738,8 +762,8 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Commands & env | `AGENTS.md` |
 | Working standards | `CLAUDE.md` |
 | Deep architecture + ADRs | `Project_Architecture_Document.md` |
-| Latest remediation ledger | `docs/remediation-plan-session8.md` |
-| Session history | `docs/session_1.md` … `session_7.md`, `worklog.md` |
+| Latest remediation ledger | `docs/remediation-plan-session9.md` |
+| Session history | `docs/session_1.md` … `session_8.md`, `worklog.md` |
 | Parity screenshots | `docs/screenshots/` |
 | Mutation seam | `src/lib/actions/*.ts` |
 | Envelope | `src/lib/action-result.ts` |

@@ -1,6 +1,6 @@
 # AURELIA — Luxury Fashion E-Commerce (VELOUR)
 
-![Next.js](https://img.shields.io/badge/Next.js-16.4-000000) ![React](https://img.shields.io/badge/React-19.3-61dafb) ![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20strict-3178c6) ![Tailwind](https://img.shields.io/badge/TailwindCSS-4.3-38bdf8) ![Prisma](https://img.shields.io/badge/Prisma-6.19-2D3748) ![Tests](https://img.shields.io/badge/tests-109%20unit%20%2B%20118%20e2e-brightgreen)
+![Next.js](https://img.shields.io/badge/Next.js-16.4-000000) ![React](https://img.shields.io/badge/React-19.3-61dafb) ![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20strict-3178c6) ![Tailwind](https://img.shields.io/badge/TailwindCSS-4.3-38bdf8) ![Prisma](https://img.shields.io/badge/Prisma-6.19-2D3748) ![Tests](https://img.shields.io/badge/tests-113%20unit%20%2B%20126%20e2e-brightgreen)
 
 A production-grade luxury fashion storefront + admin console — a **functional superset** of the reference prototype `pastel-aurelia-fashion-edit.base44.app` with resting-state visual parity: full catalog, cart, guest+member checkout, wishlist, customer accounts, and a role-gated admin, where the reference shipped inert buttons and two pages.
 
@@ -10,7 +10,7 @@ A production-grade luxury fashion storefront + admin console — a **functional 
 
 ## Overview
 
-The reference site is a polished **visual prototype**: working login, cart drawer and search overlay — but every commerce action (`Add to Bag`, category cards, wishlist) is inert, and every catalog route 404s. This codebase reproduces its look (measured computed styles: Cormorant Garamond + Montserrat, warm-paper palette, gold accents, per-slide left/right/center-anchored hero with a horizontal push transition, the brand marquee strip, the composite Exclusive Deals section — merged header row with the right-stacked live countdown + bento tiles + inline sale grid, fixed-width product-row cards with the measured text stack (name, stroke stars, color swatches, size chips, discount chips), the five-item `w-80` mobile drawer with `flex gap-5` stacking) on a real architecture — Next.js 16 App Router, server actions as the single mutation seam, Prisma/SQLite persistence, scrypt+session auth — and makes every interaction real.
+The reference site is a polished **visual prototype**: working login, cart drawer and search overlay — but every commerce action (`Add to Bag`, category cards, wishlist) is inert, and every catalog route 404s. This codebase reproduces its look (measured computed styles: Cormorant Garamond + Montserrat — every heading rank, card names included, renders the display serif — warm-paper palette, gold accents, per-slide left/right/center-anchored hero with a horizontal push transition, the brand marquee strip, the composite Exclusive Deals section — merged header row with the right-stacked live countdown + bento tiles + inline sale grid, fixed-width product-row cards with the measured text stack (Cormorant name, stroke stars, color swatches, size chips, discount chips), the five-item `w-80` mobile drawer with `flex gap-5` stacking) on a real architecture — Next.js 16 App Router, server actions as the single mutation seam, Prisma/SQLite persistence, scrypt+session auth — and makes every interaction real.
 
 ## Key Features
 
@@ -38,7 +38,7 @@ The reference site is a polished **visual prototype**: working login, cart drawe
 | ORM / DB | Prisma + SQLite | 6.19.3 | 13 models, single-file DB at `db/custom.db` |
 | Auth | Custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 | Validation | Zod | 3.25.76 | Every seam (forms, actions, admin updates) |
-| Testing | Vitest 3.2.7 + Playwright 1.64.0 | — | 109 unit + 60 E2E cases × 2 device projects |
+| Testing | Vitest 3.2.7 + Playwright 1.64.0 | — | 113 unit + 63 E2E cases × 2 device projects |
 
 ```text
 Browser ── RSC pages (force-dynamic)
@@ -73,8 +73,8 @@ Demo accounts (printed on `/login` in development only — hidden in production 
 ## Testing
 
 ```bash
-npm run verify        # typecheck → lint → vitest (109) → production build
-npm run test:e2e      # Playwright: boots the production standalone (build FIRST — 60 cases × 2 projects, +2 setup)
+npm run verify        # typecheck → lint → vitest (113) → production build
+npm run test:e2e      # Playwright: boots the production standalone (build FIRST — 63 cases × 2 projects, +2 setup)
 npx playwright test tests/e2e/mobile-navigation.spec.ts   # single spec
 npx vitest run src/lib/money.test.ts                      # single unit file
 ```
@@ -107,7 +107,7 @@ PORT=3000 NODE_ENV=production AUTH_SECRET=<secret> DATABASE_URL="file:<absolute>
 | Reference recon (computed-style spec) | ✅ | `recon` artifacts + measured pins |
 | Transformation to Next.js 16 | ✅ | Vite SPA lineage archived in `docs/legacy-homenest/` |
 | Functional superset (PLP/PDP/cart/checkout/account/admin) | ✅ | All commerce paths live |
-| Test suites (vitest + playwright) | ✅ | 109 unit · 60 E2E × 2 + 2 setup, all green |
+| Test suites (vitest + playwright) | ✅ | 113 unit · 63 E2E × 2 + 2 setup, all green |
 | Docs (AGENTS/CLAUDE/README/PAD + distilled SKILL.md) | ✅ | This release |
 
 ## License

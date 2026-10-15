@@ -57,9 +57,11 @@ test.describe("mobile navigation", () => {
       expect(box!.height).toBeGreaterThan(0);
       if (previous) {
         const gap = box!.y - (previous.y + previous.height);
-        // gap-5 = 1.25rem = 20px; allow sub-pixel rendering slack but
-        // FAIL on zero/negative gaps (the space-y collapse signature).
-        expect(gap).toBeGreaterThan(8);
+        // gap-5 = 1.25rem = 20px; the measured reference gaps are [20,20,20,20]
+        // (re-verified live, session 9). H-62: pinned to the measured BAND —
+        // the old "positive gap" assert let a gap-4 (16px) regression pass.
+        expect(gap).toBeGreaterThanOrEqual(19);
+        expect(gap).toBeLessThanOrEqual(21);
       }
       previous = { y: box!.y, height: box!.height };
     }

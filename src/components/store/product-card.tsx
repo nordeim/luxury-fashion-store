@@ -141,7 +141,14 @@ export function ProductCard({ product, onQuickView }: ProductCardProps) {
           </p>
         )}
         <p className="font-sans text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">{product.brand}</p>
-        <h3 className="font-sans font-medium text-foreground leading-snug mb-2 text-sm">
+        {/* P-15 (session-9): the reference maps EVERY heading — card-name
+            h3s included — to the display serif (census: 40/40 h1/h2/h3 are
+            Cormorant Garamond; its font-body utility only covers non-heading
+            elements). The Montserrat name wrapped at the 163px mobile
+            sale-grid tiles (+61px deals drift, mis-classified as content
+            variance in session 8). font-medium/leading-snug/text-sm match the
+            reference's 14px/500/19.25px line box. */}
+        <h3 className="font-cormorant font-medium text-foreground leading-snug mb-2 text-sm">
           <Link href={`/product/${product.slug}`} className="hover:text-gold transition-colors">
             {product.name}
           </Link>
