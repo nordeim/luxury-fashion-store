@@ -1,7 +1,7 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.4.0
+version: 1.5.0
 last_updated: 2026-10-15
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
 project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 113/113 unit (14 files) ✓ build ✓ E2E 126 passed + 2 skipped (63 unique cases × chromium+mobile, two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
@@ -428,6 +428,20 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
     class (`font-sans` → `font-cormorant` on the card-name h3, session 9,
     P-15). Ritual addition: in every parity sweep, census computed
     `fontFamily` per heading rank on BOTH sides alongside the height census.
+27. **[CRITICAL] The standalone server RENAMES its process to
+    `next-server (v<N>)` — killing the OLD server by its original name
+    silently fails and `reuseExistingServer` then serves a STALE bundle.**
+    After `node .next/standalone/server.js` boots, its process title is no
+    longer `node .next/standalone/server.js`, so `pkill -f
+    "standalone/server.js"` and `pgrep` find NOTHING while the stale server
+    keeps :3100 (the next boot dies with EADDRINUSE, errno -98) — and the
+    E2E suite then "validates the last build" against whatever the stale
+    server still has in memory (session 10: a RED-demo run validated the
+    PRE-mutation bundle this way, and the next boot's EADDRINUSE was almost
+    missed). Kill by PORT or PID: `kill $(ss -ltnp | grep :3100 | grep -oP
+    'pid=\K[0-9]+')` or `pkill -f next-server`. Ritual: after any rebuild
+    meant for a manual server, verify the SERVED CONTENT changed (e.g. the
+    chip inventory in the home HTML), not just that the port answers.
 
 ## §10 Debugging Guide (symptom → cause → fix)
 
@@ -454,6 +468,7 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
 | A new admin-login test makes LATER admin logins 429/bounce to /account | The per-IP admin bucket is exactly consumed at 10 (§9 #23) | SQL fixture via `prisma db execute` (H-2/H-39 pattern); never add logins |
 | A flexDirection/alignment pin passes on desktop but fails mobile with "row ≠ column" on a container you never meant to target | `flexDirection` defaults to "row" on every element — a div-has-both locator matches an outer wrapper (§9 #24) | Locate the structural container (the testid's direct parent) |
 | React warns "The result of getSnapshot should be cached" / re-renders in a loop | The store's getSnapshot re-derives from the clock each call and crosses a second boundary between React's reads (§9 #25) | Cache the snapshot per tick; invalidate on fan-out |
+| A Playwright click on an SSR node "succeeds" but the state never changes (aria-pressed stays "false", no console error) — flaky, passes on retry runs | The click landed in the PRE-HYDRATION window: the SSR node has no fiber props, so React's delegated handler ignores it (session 10, H-64) | Poll for the `__reactFiber$` expando on the node before interacting (`expect.poll(() => el.evaluate(n => Object.keys(n).filter(k => k.startsWith("__reactFiber$")).length)).toBeGreaterThan(0)`) — both chip-clicking specs carry it |
 | Drawer/modal keyboard users Tab into the page behind | Hand-rolled dialogs never moved focus or trapped Tab (H-26) | `installFocusTrap` in the surface's open-effect (`src/lib/focus-trap.ts`) — keep it on every new hand-rolled dialog |
 | E2E fails only on the SECOND run; drawer/cart specs see extra lines | Cross-run residue: the seed never deletes (§ session-5 H-22) | `global-setup` wipes carts/wishlists/sessions — keep it |
 | E2E drawer specs see TWO lines with one add (session-6, mid-run) | Within-run residue: the merge test left its line; fixed by cleaning up after itself + wiping ALL orders at setup (H-24/H-25) | `global-setup` order wipe + re-seed; specs that mutate shared state clean up |
@@ -536,7 +551,11 @@ suites; no `db/*.db` staged; commit goes to `main` only.
     copy. **But classify before accepting: session 8 accepted a +61px
     mobile-deals delta as "content drift" that was actually a font-family
     drift (P-15) — measure the reference's own rendering of the SAME text
-    before accepting a variance as data-driven.**
+    before accepting a variance as data-driven.** Session 10 re-ran the FULL
+    ritual (height census + font census, both viewports) same-day and found
+    ZERO drift — the reference holds still at hour granularity too; the
+    ritual is what makes "no news" a verified result instead of an
+    assumption.
 
 ## §13 Pitfalls to Avoid (the "don't" list)
 

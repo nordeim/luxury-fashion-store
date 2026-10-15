@@ -72,7 +72,7 @@ mobile page 11257. The census ALSO caught the one drift below — and
 | H-56 🟡 | **H-54 is half-done in the executor**: `planAdjustment` returns `{ kind: "skip" }` and its docstring claims "a no-op must not UPDATE + touch the parent row + revalidate" — but `adjustCartItemAction` has NO skip branch: a `skip` plan falls through to `touchTransientParent("cart", …)` + `revalidatePath("/", "layout")` (`cart.ts:207-208`). A zero-delta call (and the sold-out skip) still bumps the parent `updatedAt` — defeating the sweeper's idle>30d predicate (H-42) for a no-op — and invalidates the router cache pointlessly. | Early-return the skip path: return the fresh DTO WITHOUT the parent touch or revalidate (nothing was written; all routes force-dynamic; the client store re-syncs from the response DTO). |
 | H-57 🟡 | **The P-11 E2E is weaker than its documentation**: the plan claims "chip count == sizes length, chip labels, border token via probe" but the shipped test asserts only per-chip fs/pad/border/radius + `chips.length >= 1`; `label`/`bg` are captured and never asserted. Worse, the resting-state capture (`before = borderTopColor`) is never asserted — a build that renders a DEFAULT-SELECTED chip at rest (the exact parity violation P-11 forbids) still passes because clicking toggles the color either way. And the behavioral half — "clicking selects the size the card's Add to Bag posts" — is pinned nowhere (`rg "\bsize\b" cart-checkout.spec.ts` → 0 hits). | Strengthen the pin: assert the resting chip border is NOT the selected token AND bg transparent + labels equal the product's sizes + `chips.length === sizes.length` (server-derived via the size chips' own labels vs the PDP/add payload is not available client-side — pin the label list against the rendered set). Add the behavioral E2E: click the 2nd chip → hover Add to Bag → open the drawer → the line reads `Size: <clicked>`; clean the line up afterwards (within-run residue rule). |
 | H-58 🟡 | **P-13's "View All hides below lg" sub-claim has no test** (`rg "View All" tests/e2e/` → 0 hits). The class shipped (`ml-2 hidden lg:inline-block`), but a dropped `hidden` regresses every mobile row header (103–118px vs the measured uniform 63px) silently — the same underpinned-face drift class as P-11/P-15. | Viewport-conditional E2E pin: below lg the row-header "View All" link has `display: none`; at ≥lg it is visible. |
-| H-59 🟡 | **`addToCartAction` never allowlists `size` against `product.sizes`**: `cartAddSchema` enforces only `z.string().max(20)`; after the product fetch the action checks `isActive`/`stock` but nothing constrains `size` to the product's actual size list (`sizes` is a JSON-string column). A crafted server-action call can persist an arbitrary ≤20-char variant (duplicate lines per fake size, echoed back into the cart UI; Prisma parameterizes — data integrity only). Pre-existing, but **P-11 widened the seam**: size is now a user-clicked input on every card, not a server-derived `sizes[0]`. | New pure seam `sizeAllowed(productSizesJson, requested)` in `validation.ts` (parse JSON; non-array/malformed/empty → unconstrained `true`; string list → `includes`). The action fails the envelope when the product's sizes are known and the request is foreign. Unit-pinned (6 cases); existing add-to-bag E2Es prove no false positives. UI-driven rejection is unreachable (every surface posts server-derived sizes) — the action wiring itself is 3 lines and disclosed as E2E-unpinned. |
+| H-59 🟡 | **`addToCartAction` never allowlists `size` against `product.sizes`**: `cartAddSchema` enforces only `z.string().max(20)`; after the product fetch the action checks `isActive`/`stock` but nothing constrains `size` to the product's actual size list (`sizes` is a JSON-string column). A crafted server-action call can persist an arbitrary ≤20-char variant (duplicate lines per fake size, echoed back into the cart UI; Prisma parameterizes — data integrity only). Pre-existing, but **P-11 widened the seam**: size is now a user-clicked input on every card, not a server-derived `sizes[0]`. | New pure seam `sizeAllowed(productSizesJson, requested)` in `validation.ts` (parse JSON; non-array/malformed/empty → unconstrained `true`; string list → `includes`). The action fails the envelope when the product's sizes are known and the request is foreign. Unit-pinned (4 cases, 9 assertions — H-66 session-10 correction: this cell originally said "6 cases" and the ledger below said "11 assertions", both wrong); existing add-to-bag E2Es prove no false positives. UI-driven rejection is unreachable (every surface posts server-derived sizes) — the action wiring itself is 3 lines and disclosed as E2E-unpinned. |
 
 #### P2 — hygiene / pins / docs
 
@@ -93,7 +93,7 @@ newsletter band on all storefront pages (superset choice).
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Unit RED: `sizeAllowed` seam pins (H-59 — 4 cases, 11 assertions) | ✅ |
+| 1 | Unit RED: `sizeAllowed` seam pins (H-59 — 4 cases, 9 assertions — H-66 session-10 correction of the original "11 assertions") | ✅ |
 | 2 | E2E RED (pre-fix build): P-15 name-font pin + mobile sale-grid name-height pin (TRUE red); H-57 resting/labels/count + posted-size behavioral pin, H-58 View-All pin, H-62 20px gap band (characterization — pass on the current build, disclosed) | ✅ |
 | 3 | GREEN: `product-card.tsx:144` `font-sans` → `font-cormorant` (P-15); `cart.ts` skip early-return (H-56) + `sizeAllowed` wiring (H-59); spec strengthening (H-57/H-58/H-62) | ✅ |
 | 4 | Rebuild → full gates (typecheck/lint/unit/build/E2E) — **build BEFORE E2E** (§9 #16) | ✅ |
@@ -124,10 +124,14 @@ newsletter band on all storefront pages (superset choice).
 - Parity live-verified on the remediated build (1440×900 + 390×844): desktop
   page 11085 (ref 11079, ≤2px/section line-box rounding, unchanged by the
   fix — name line box is 19px in both families at desktop widths); **mobile
-  deals 3171 = 3171 byte-equal** (was 3232), mobile page 11261 (ref 11257,
-  +4px accumulated rounding), sale-grid tiles 421 = 421, card names compute
+  deals 3174 vs 3171** (was 3232), mobile page 11264 (ref 11257,
+  +7px accumulated rounding), sale-grid tiles 422 vs 421, card names compute
   to Cormorant Garamond everywhere; drawer 5 items gaps [20,20,20,20]
   char-identical panel; marquee/hero/chips/bento unchanged; console 0 errors.
+  *(Session-10 annotation, H-66: this bullet originally read "deals 3171 =
+  3171 byte-equal … page 11261 … tiles 421 = 421" — wrong numbers; the commit
+  message, worklog and session-10's independent re-measurement all record
+  3174 / 11264 / 422. Corrected in place per the H-60 precedent.)*
 - Screenshots refreshed: `clone-size-chips.png` (now with Cormorant names),
   `clone-mobile-home.png`, `clone-exclusive-deals.png`, `clone-home-desktop.png`,
   `clone-pdp.png` + the standard set.

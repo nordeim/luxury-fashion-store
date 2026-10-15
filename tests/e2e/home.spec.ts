@@ -18,6 +18,10 @@
 // product card grew a name-adjacent swatch row, stroke stars, a -{discount}%
 // image chip and dropped the "NEW" chip. Pins below enforce all of it.
 import { expect, test } from "@playwright/test";
+// H-63 (session-10): the size-chip pin resolves the rendered card's EXACT
+// size list from the pinned catalog (the parity contract's source of truth).
+// The module is pure data — zero imports — safe for the spec loader.
+import { CATALOG_PRODUCTS } from "../../src/lib/data/catalog";
 
 test.describe("home", () => {
   test("renders the hero carousel with brand chrome", async ({ page }) => {
@@ -322,13 +326,18 @@ test.describe("home", () => {
       });
     });
     // P-11: the reference renders ONE bordered chip per product size
-    // ("One Size" for the bag) — 10px, py-1, 1px border, square, and the
-    // labels are the product's size list (H-57: labels + count pinned, not
-    // just "at least one").
+    // ("One Size" for the bag) — 10px, py-1, 1px border, square.
+    // H-57 + H-63 (session-10): the chip list is the product's EXACT size
+    // list — count, spelling AND order — resolved from the pinned catalog
+    // by the card's own rendered name (no first-card assumption). The
+    // session-9 pin ("≥ 1 + distinct") let a dropped-size build pass.
     expect(chips.length).toBeGreaterThanOrEqual(1);
     const labels = chips.map((c) => c.label);
     for (const label of labels) expect(label.length).toBeGreaterThan(0);
-    expect(new Set(labels).size).toBe(labels.length); // one chip per distinct size
+    const name = (await card.locator("h3").innerText()).trim();
+    const catalogProduct = CATALOG_PRODUCTS.find((p) => p.name === name);
+    expect(catalogProduct, `catalog product for rendered card name "${name}"`).toBeDefined();
+    expect(labels).toEqual(catalogProduct!.sizes);
     for (const chip of chips) {
       expect(chip.fs).toBe("10px");
       expect(parseFloat(chip.padY)).toBe(4);
@@ -354,17 +363,46 @@ test.describe("home", () => {
     expect(resting.borders[0]).not.toBe(resting.selected);
     // Superset: clicking a chip selects the size the card's Add to Bag posts
     // (selected state = border-foreground) — and ONLY that chip flips.
+    // H-64 companion (session-10): wait for HYDRATION before the click — a
+    // click landing on a not-yet-hydrated SSR node is silently lost (no
+    // fiber props → no React handler → aria-pressed stays "false"; this
+    // race fired live during the session-10 RED demo). Hydrated nodes carry
+    // the __reactFiber$ expando — the direct, reliable probe.
+    await expect
+      .poll(() =>
+        card
+          .locator(".flex-wrap button")
+          .first()
+          .evaluate((el) => Object.keys(el).filter((k) => k.startsWith("__reactFiber$")).length)
+      )
+      .toBeGreaterThan(0);
     const first = card.locator(".flex-wrap button").first();
     const before = resting.borders[0];
     await first.click();
+    // H-64 (session-10): the click's React state is the truth — poll
+    // aria-pressed === "true" BEFORE the border read. The border poll alone
+    // passes on the hover flip (hover:border-foreground), and a click that
+    // lands in the pre-hydration window is silently lost (SSR node without
+    // fiber props) — the session-9 assertion passed vacuously through both.
     await expect
-      .poll(() => first.evaluate((el) => getComputedStyle(el).borderTopColor), { timeout: 5_000 })
-      .not.toBe(before); // React re-render timing — poll, don't race
+      .poll(() => first.evaluate((el) => el.getAttribute("aria-pressed")), { timeout: 5_000 })
+      .toBe("true");
+    // Park the pointer OFF the card before re-reading — the clicked chip
+    // carries hover:border-foreground, so the pointer resting on it would
+    // make "exactly one flipped" pass even if selection never applied.
+    // Off-card, only the state flip survives the 150ms transition-colors.
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(200);
     const after = await card.evaluate((el) => {
       const buttons = Array.from(el.querySelectorAll(".flex-wrap button"));
       return buttons.map((b) => getComputedStyle(b).borderTopColor);
     });
     expect(after.filter((c) => c !== before).length).toBe(1); // exactly one selected
+    expect(after[0]).not.toBe(before); // and it is the clicked chip
+    const pressed = await card.evaluate((el) =>
+      Array.from(el.querySelectorAll(".flex-wrap button")).map((b) => b.getAttribute("aria-pressed"))
+    );
+    expect(pressed.filter((p) => p === "true").length).toBe(1); // state truth, hover-immune
   });
 
   test("card names render the display serif (P-15 — the reference's heading rule)", async ({ page }) => {
@@ -404,6 +442,10 @@ test.describe("home", () => {
     const display = await viewAll.evaluate((el) => getComputedStyle(el).display);
     if (width >= 1024) {
       expect(display).not.toBe("none");
+      // H-65 (session-10): match the <lg branch's exactness — a
+      // visibility:hidden desktop regression passes a display-only pin.
+      const visibility = await viewAll.evaluate((el) => getComputedStyle(el).visibility);
+      expect(visibility).toBe("visible");
     } else {
       // The reference hides View All on mobile (display:none measured @390 —
       // a visible link wrapped the row header to 103-118px vs the uniform 63px).

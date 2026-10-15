@@ -45,6 +45,17 @@ test.describe("cart + checkout", () => {
     const chipCount = await chips.count();
     expect(chipCount).toBeGreaterThanOrEqual(2);
     const wanted = ((await chips.nth(1).textContent()) ?? "").trim();
+    // Session-10: wait for HYDRATION before the chip click — a click landing
+    // on a not-yet-hydrated SSR node is silently lost (no fiber props → no
+    // React handler; the race fired live in the P-11 RED demo). Hydrated
+    // nodes carry the __reactFiber$ expando.
+    await expect
+      .poll(() =>
+        chips
+          .nth(1)
+          .evaluate((el) => Object.keys(el).filter((k) => k.startsWith("__reactFiber$")).length)
+      )
+      .toBeGreaterThan(0);
     await chips.nth(1).click();
     await expect
       .poll(() => chips.nth(1).evaluate((el) => getComputedStyle(el).borderTopColor), { timeout: 5_000 })
