@@ -1,7 +1,7 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.7.0
+version: 1.7.1
 last_updated: 2026-10-15
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
 project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 113/113 unit (14 files) ✓ build ✓ E2E 132 passed + 2 skipped (66 unique cases × chromium+mobile, two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
@@ -463,6 +463,20 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
     the sweep script probes :3100 BEFORE spawning and fails fast with the
     fix spelled out when a stale server (trap #27's survivor) holds the
     port — measuring an unknown server would silently poison the census.
+29. **[MEDIUM] Health-green is not liveness — a guard can race its own event
+    delivery.** Session 13's second sweep-tool hardening (F1) closed the
+    poison window M1's probe cannot: a child that dies at boot (EADDRINUSE
+    lost in the probe→spawn gap, a crash) while a FOREIGN process answers
+    the health probe. Two lessons from the RED→GREEN demo: (a) the first
+    fix — a bare `childDied` flag checked right after health-green — passed
+    vacuously because the foreign 200 (≈10ms) beat the dead child's exit
+    event (≈50ms); a flag check must not assume event delivery has
+    completed — race a death-promise against a 300ms grace window instead.
+    (b) `waitHealth`'s global budget was only evaluated ACROSS retries: a
+    socket that connects but never responds hung one request forever past
+    its own timeout — every retry loop needs a per-request deadline
+    (`req.setTimeout`), not just a cross-retry budget. Same failure family
+    as trap #27 (measure the wrong thing confidently), one door narrower.
 
 ## §10 Debugging Guide (symptom → cause → fix)
 

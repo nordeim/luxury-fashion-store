@@ -44,7 +44,8 @@ test.describe("product detail", () => {
   // spelling + order) — the render path (`product.sizes.map`,
   // product-detail.tsx) is shared, but the DATA (a missing/renamed size on
   // any non-first product) was unpinned until now. Chips are scoped to the
-  // size block via its unique "Size Guide" sibling — the related grid's
+  // size block via its unique "Size Guide" descendant (filter({ has }) —
+  // the button lives INSIDE the block, it is not a sibling) — the related grid's
   // ProductCards render their own aria-pressed chips and must not leak in.
   // SSR text: no clicking, so no hydration probe needed.
   //
@@ -53,7 +54,7 @@ test.describe("product detail", () => {
   // renders, and BOTH the chip-count (0 === 0) and `toEqual([])` would pass
   // without the page rendering anything. Asserting the anchor exists keeps
   // the census loud for that case and for any refactor that moves the
-  // `mb-6` anchor or the Size Guide sibling (the L3 coupling is
+  // `mb-6` anchor or the Size Guide descendant (the L3 coupling is
   // loud-by-design). The loop stays one test (a failure at product k
   // aborts k+1..12 in that run) to keep the documented "66 cases"
   // arithmetic — revisit only if mid-census triage ever demands it.

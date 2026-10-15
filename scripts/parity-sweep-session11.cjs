@@ -9,8 +9,11 @@ const { spawn } = require("child_process");
 const http = require("http");
 const net = require("net");
 
+// F4 (session-13): one port constant — playwright.config.ts honors E2E_PORT,
+// the sweep tool now follows it instead of hardcoding :3100 three times.
+const PORT = Number(process.env.E2E_PORT ?? 3100);
 const REF = "https://pastel-aurelia-fashion-edit.base44.app/";
-const CLONE = "http://127.0.0.1:3100/";
+const CLONE = `http://127.0.0.1:${PORT}/`;
 
 // M1 (session-12): probe the port BEFORE spawning. A leftover E2E webServer
 // (or any process on :3100) used to make the spawned server die silently
@@ -42,6 +45,11 @@ function waitHealth(url, timeoutMs) {
         if (res.statusCode === 200) return resolve();
         res.on("end", retry);
       });
+      // F3 (session-13): the 30s budget was only evaluated ACROSS retries —
+      // a socket that connects but never responds left a request pending
+      // forever and the sweep hung past its own timeout. Give each request
+      // its own deadline; the destroy surfaces as an 'error' -> retry.
+      req.setTimeout(2000, () => req.destroy(new Error("per-request health timeout")));
       req.on("error", retry);
     };
     const retry = () => {
@@ -135,10 +143,10 @@ async function pinnedSurfaces(page) {
   const results = {};
   const fs = require("fs");
   const SHOTS = process.argv.includes("--shots");
-  await assertPortFree(3100);
+  await assertPortFree(PORT);
   const server = spawn("node", [".next/standalone/server.js"], {
     cwd: process.cwd(),
-    env: { ...process.env, PORT: "3100", NODE_ENV: "production", DATABASE_URL: "file:" + process.cwd() + "/db/custom.db" },
+    env: { ...process.env, PORT: String(PORT), NODE_ENV: "production", DATABASE_URL: "file:" + process.cwd() + "/db/custom.db" },
     // M1: capture stderr so a boot failure prints the server's own error
     // instead of a bare health timeout; stdout stays drained.
     stdio: ["ignore", "ignore", "pipe"],
@@ -148,20 +156,57 @@ async function pinnedSurfaces(page) {
     serverErrTail.push(String(d));
     if (serverErrTail.length > 40) serverErrTail.shift();
   });
-  server.on("error", (e) => {
-    console.error("SERVER SPAWN ERROR:", e);
-    process.exit(1);
-  });
+  // F2 (session-13): a spawn 'error' (ENOENT, EACCES, ...) must flow through
+  // the main catch so `finally` still runs — process.exit(1) bypassed it and
+  // skipped browser.close()/server.kill()/the results file.
+  let spawnError = null;
+  server.on("error", (e) => { spawnError = e; });
+  // F1 (session-13): health-green does not mean OUR server answered. A child
+  // that dies at boot (EADDRINUSE lost in the probe->spawn window, a crash)
+  // used to leave waitHealth probing a FOREIGN process on :3100 — the same
+  // confidently-wrong-census failure class M1 targets, through a narrower
+  // door. Track the child's liveness; check it the moment health turns green.
+  // NOTE: a bare flag check raced the exit-event DELIVERY — a fast foreign 200
+  // (≈10ms) beat the dead child's exit event (≈50ms) and the guard passed
+  // vacuously (caught first-hand in the session-13 RED->GREEN demo). The guard
+  // therefore RACES the death-promise against a 300ms grace window: a child
+  // dead at boot always delivers 'exit' inside it; a healthy child just pays
+  // 300ms per sweep.
+  let childDied = null;
+  let signalChildDeath = () => {};
+  const childDeath = new Promise((resolve) => { signalChildDeath = resolve; });
+  server.on("exit", (code, signal) => { childDied = { code, signal }; signalChildDeath(); });
+  const assertChildAlive = () => {
+    if (childDied) {
+      if (serverErrTail.length) {
+        console.error("--- server stderr tail ---\n" + serverErrTail.join(""));
+      }
+      throw new Error(
+        `standalone server exited during boot (code ${childDied.code}, signal ${childDied.signal}) — ` +
+        "the health response came from a foreign process or the server crashed. " +
+        "Kill the stale process on :" + PORT + " / fix the boot failure, then re-run."
+      );
+    }
+    if (spawnError) {
+      throw new Error("standalone server failed to spawn: " + spawnError.message);
+    }
+  };
   let browser;
   try {
     try {
       await waitHealth(CLONE + "api/health", 30000);
     } catch (e) {
+      assertChildAlive(); // F1: a dead child is a sharper diagnosis than a timeout
       if (serverErrTail.length) {
         console.error("--- server stderr tail ---\n" + serverErrTail.join(""));
       }
       throw e;
     }
+    // F1: the poison-window guard — give the exit event a 300ms delivery
+    // window, then require the child to be alive. Green health + dead child
+    // = the health response came from a foreign process.
+    await Promise.race([childDeath, new Promise((r) => setTimeout(r, 300))]);
+    assertChildAlive();
     browser = await chromium.launch();
     const errors = [];
 
@@ -243,10 +288,9 @@ async function pinnedSurfaces(page) {
       await rctx.close();
     }
     results.consoleErrors = errors.slice(0, 20);
-    // M1: close the browser in the guarded path AND the finally below —
-    // a mid-census throw used to leak the process until exit().
-    await browser.close();
   } finally {
+    // M1/F6: the single guarded close — a mid-census throw used to leak the
+    // process until exit(); close() is idempotent, one call here suffices.
     if (browser) await browser.close().catch(() => {});
     server.kill("SIGKILL");
   }
