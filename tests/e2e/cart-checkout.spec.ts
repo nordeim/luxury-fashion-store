@@ -35,7 +35,10 @@ async function emptyTheBag(page: import("@playwright/test").Page) {
 
 test.describe("cart + checkout", () => {
   test("card size-chip selection drives the posted size (H-57b — the P-11 behavioral half)", async ({ page }) => {
-    // Home row card (Cashmere Overcoat: XS S M L). Click the SECOND chip —
+    // Home row FIRST card — whichever catalog product that is (H-69: the
+    // card is located by its own rendered chips, never by name; the first
+    // card is deterministic via the New Arrivals sort but its NAME may
+    // legitimately change with the catalog). Click the SECOND chip —
     // the card's Add to Bag must post THAT size, proving the selectable
     // superset end-to-end (the old pins proved only the visual flip).
     await page.goto("/");

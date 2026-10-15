@@ -35,13 +35,28 @@ export default async function StorefrontLayout({
     >
       {/* Chrome order mirrors the reference: announcement strip, sticky
           header, overlay layers (nav drawer, bag drawer, search), page,
-          newsletter band, footer. */}
+          newsletter band, footer.
+
+          A-1 (session-11): the skip link is the FIRST chrome element — the
+          first Tab stop for keyboard users — and is sr-only at rest (a 1×1
+          clipped box, zero resting visual footprint), revealed on focus
+          only. Parity law respected: the reference never exercises the
+          focus layer, so the resting output is unchanged. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:z-[60] focus:bg-background focus:px-4 focus:py-2 focus:border focus:border-foreground focus:font-montserrat focus:text-[10px] focus:tracking-[0.25em] focus:uppercase focus:text-foreground"
+      >
+        Skip to content
+      </a>
       <AnnouncementBar />
       <Header />
       <MobileNav />
       <CartDrawer />
       <SearchOverlay />
-      <main className="min-h-[60vh]">{children}</main>
+      {/* A-1 (session-11): fragment target — tabIndex=-1 makes <main>
+          focusable so Enter on the skip link moves FOCUS here, not just
+          scroll (WCAG 2.4.1). focus:outline-none keeps the jump silent. */}
+      <main id="main-content" tabIndex={-1} className="min-h-[60vh] focus:outline-none">{children}</main>
       <Newsletter />
       <Footer />
     </StoreProvider>

@@ -1,6 +1,7 @@
 // PDP — size chips, quantity steppers, Add to Bag → drawer opens with the
 // line (server-truth count), related row, wishlist toggle.
 import { expect, test } from "@playwright/test";
+import { CATALOG_PRODUCTS } from "../../src/lib/data/catalog";
 
 // The PDP's related grid renders ProductCards whose hover-revealed
 // "Add to Bag" buttons also match by name — scope to the main CTA (first
@@ -33,6 +34,30 @@ test.describe("product detail", () => {
     // Decrement floors at 1 — the stepper disables there (oversell guard UI).
     await minus.click();
     await expect(minus).toBeDisabled();
+  });
+
+  // H-67 (session-11): the home-card exact-list pin (H-63) covers only the
+  // first New-Arrivals product — ONE of the catalog's SEVEN size
+  // vocabularies (letter XS–XXL, numeric 40–45 shoes, slash S/M–L/XL, and
+  // One Size). This census walks EVERY catalog product's PDP and asserts the
+  // rendered chip list EQUALS that product's catalog sizes (count +
+  // spelling + order) — the render path (`product.sizes.map`,
+  // product-detail.tsx) is shared, but the DATA (a missing/renamed size on
+  // any non-first product) was unpinned until now. Chips are scoped to the
+  // size block via its unique "Size Guide" sibling — the related grid's
+  // ProductCards render their own aria-pressed chips and must not leak in.
+  // SSR text: no clicking, so no hydration probe needed.
+  test("size-vocabulary census: every PDP renders its exact catalog size list (H-67)", async ({ page }) => {
+    for (const product of CATALOG_PRODUCTS) {
+      await page.goto(`/product/${product.slug}`);
+      const sizeBlock = page
+        .locator("main div.mb-6")
+        .filter({ has: page.getByRole("button", { name: "Size Guide" }) });
+      const chips = sizeBlock.locator("button[aria-pressed]");
+      await expect(chips).toHaveCount(product.sizes.length);
+      const labels = (await chips.allInnerTexts()).map((s) => s.trim());
+      expect(labels, `size chips on /product/${product.slug}`).toEqual(product.sizes);
+    }
   });
 
   test("Add to Bag opens the drawer with server-truth count", async ({ page }) => {

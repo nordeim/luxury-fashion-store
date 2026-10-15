@@ -1,10 +1,10 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.5.0
+version: 1.6.0
 last_updated: 2026-10-15
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
-project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 113/113 unit (14 files) ✓ build ✓ E2E 126 passed + 2 skipped (63 unique cases × chromium+mobile, two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
+project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 113/113 unit (14 files) ✓ build ✓ E2E 132 passed + 2 skipped (66 unique cases × chromium+mobile, two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
 reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only prototype (inert commerce buttons). This repo is its functional superset with resting-state visual parity."
 ---
 
@@ -94,7 +94,7 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
 | Unit tests | Vitest (node env) | 3.2.7 | 113 tests in `src/lib/*.test.ts` (14 files) |
-| E2E | Playwright (standalone server) | 1.64.0 | 63 unique cases × 2 device projects (+2 setup) |
+| E2E | Playwright (standalone server) | 1.64.0 | 66 unique cases × 2 device projects (+2 setup) |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -284,9 +284,17 @@ need for a setState-in-effect, the codebase answer is pattern 1 or 2 above.
 - **`sr-only`** helpers on icon-only controls (e.g. sheet close).
 - **Focus visibility** via `--color-ring` (gold) on `focus-visible`.
 - Radix primitives bring keyboard support (escape, tab-trap) for drawers/modals.
+- **Skip-to-content (A-1, session-11):** the storefront chrome's FIRST element is
+  an `sr-only` `#main-content` link — revealed on focus (first Tab stop), Enter
+  moves focus to `<main id tabIndex={-1}>`. Rest-invisible (1×1 clipped box),
+  pinned by `accessibility.spec.ts`.
+- **`prefers-reduced-motion` (A-2, session-11):** a global media query in
+  `globals.css` pins every animation to 0.01ms ×1 and every transition to
+  0.01ms for opting-out users; normal-path rendering untouched. Pinned by the
+  same spec (reduced context: marquee 1e-05s ×1; normal: 30s).
 
-Known gaps (roadmap, not regressions): no skip-to-content link yet; no
-`prefers-reduced-motion` guards on the hero carousel.
+Former roadmap gaps CLOSED in session-11: skip-to-content +
+`prefers-reduced-motion` shipped (see `docs/remediation-plan-session11.md`).
 
 ## §9 Anti-Patterns & Common Bugs (the trap log)
 
@@ -477,7 +485,7 @@ Known gaps (roadmap, not regressions): no skip-to-content link yet; no
 
 ```bash
 npm run verify                      # typecheck → lint → 113 unit → build (+ assemble)
-npm run test:e2e                    # 63 cases × 2 projects (+2 setup; build FIRST — §9 #16)
+npm run test:e2e                    # 66 cases × 2 projects (+2 setup; build FIRST — §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present (no unsafe-eval in prod)
 
 # Parity pins

@@ -335,9 +335,15 @@ test.describe("home", () => {
     const labels = chips.map((c) => c.label);
     for (const label of labels) expect(label.length).toBeGreaterThan(0);
     const name = (await card.locator("h3").innerText()).trim();
-    const catalogProduct = CATALOG_PRODUCTS.find((p) => p.name === name);
-    expect(catalogProduct, `catalog product for rendered card name "${name}"`).toBeDefined();
-    expect(labels).toEqual(catalogProduct!.sizes);
+    // H-68 (session-11): the name→catalog resolution must be UNIQUE — a
+    // future duplicate product name would silently pin the WRONG sizes.
+    const catalogMatches = CATALOG_PRODUCTS.filter((p) => p.name === name);
+    expect(
+      catalogMatches,
+      `exactly one catalog product named "${name}"`
+    ).toHaveLength(1);
+    const catalogProduct = catalogMatches[0];
+    expect(labels).toEqual(catalogProduct.sizes);
     for (const chip of chips) {
       expect(chip.fs).toBe("10px");
       expect(parseFloat(chip.padY)).toBe(4);

@@ -204,3 +204,20 @@
     background: hsl(42 75% 52% / 0.3);
   }
 }
+
+/* A-2 (session-11): prefers-reduced-motion — the WCAG 2.3.3 superset road
+   item carried since session 8. The marquee runs a 30s infinite loop and
+   the chrome uses transitions throughout; users who opt out of motion get
+   everything pinned to a single imperceptible frame instead. Normal-path
+   rendering is untouched — the media query only fires for users who ASK
+   for reduced motion, so resting parity is unaffected. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
