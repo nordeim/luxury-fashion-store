@@ -1,7 +1,7 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.6.0
+version: 1.7.0
 last_updated: 2026-10-15
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
 project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 113/113 unit (14 files) ✓ build ✓ E2E 132 passed + 2 skipped (66 unique cases × chromium+mobile, two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
@@ -450,6 +450,19 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
     'pid=\K[0-9]+')` or `pkill -f next-server`. Ritual: after any rebuild
     meant for a manual server, verify the SERVED CONTENT changed (e.g. the
     chip inventory in the home HTML), not just that the port answers.
+28. **[HIGH] Gates must run on the FINAL tree — a tool written "after the
+    gates" ships the gate red.** Session 11 committed
+    `scripts/parity-sweep-session11.cjs` (CommonJS `require()`) after its
+    last lint run: every fresh clone of that main failed `npm run verify`
+    with 5 `no-require-imports` errors the author never saw (session 12's
+    cold-clone baseline caught it — H-70). Two-part fix: (a) the eslint
+    ignores carry a scoped `scripts/**/*.cjs` entry (CJS tooling by
+    extension — app source stays fully linted); (b) the process rule: when
+    a session creates a committed tool mid-flight, RE-RUN the full gate
+    chain as the last step before commit. Corollary now enforced by tooling:
+    the sweep script probes :3100 BEFORE spawning and fails fast with the
+    fix spelled out when a stale server (trap #27's survivor) holds the
+    port — measuring an unknown server would silently poison the census.
 
 ## §10 Debugging Guide (symptom → cause → fix)
 
@@ -496,6 +509,10 @@ ls .next/standalone/.next/static >/dev/null && echo "OK: standalone assets assem
 # Contract pins
 git ls-files .env.example | grep -q . && echo "OK: .env.example tracked"
 rg -n "DATABASE_URL" .env .env.example   # both file:../db/custom.db
+
+# §9 #28: if this session ADDED any committed script, the lint above ran on
+# it — if the script was finalized after the gates, re-run `npm run lint`
+# as the LAST step before commit (session-11 shipped main lint-red).
 
 # Fresh-clone experience
 rm -rf node_modules db/custom.db && npm install && npm run db:setup && npm run dev

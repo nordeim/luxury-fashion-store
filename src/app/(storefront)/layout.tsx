@@ -42,9 +42,12 @@ export default async function StorefrontLayout({
           clipped box, zero resting visual footprint), revealed on focus
           only. Parity law respected: the reference never exercises the
           focus layer, so the resting output is unchanged. */}
+      {/* L6 (session-12): the old `focus:z-[60]` was dead styling —
+          `focus:not-sr-only` reveals the link as `position: static`, and
+          z-index is inert on non-positioned elements. */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:z-[60] focus:bg-background focus:px-4 focus:py-2 focus:border focus:border-foreground focus:font-montserrat focus:text-[10px] focus:tracking-[0.25em] focus:uppercase focus:text-foreground"
+        className="sr-only focus:not-sr-only focus:bg-background focus:px-4 focus:py-2 focus:border focus:border-foreground focus:font-montserrat focus:text-[10px] focus:tracking-[0.25em] focus:uppercase focus:text-foreground"
       >
         Skip to content
       </a>

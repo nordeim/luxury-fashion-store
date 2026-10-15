@@ -7,9 +7,31 @@
 const { chromium } = require("playwright");
 const { spawn } = require("child_process");
 const http = require("http");
+const net = require("net");
 
 const REF = "https://pastel-aurelia-fashion-edit.base44.app/";
 const CLONE = "http://127.0.0.1:3100/";
+
+// M1 (session-12): probe the port BEFORE spawning. A leftover E2E webServer
+// (or any process on :3100) used to make the spawned server die silently
+// while waitHealth probed the OLD build — a confidently wrong census (the
+// trap-#27 failure class). Fail fast with the fix spelled out instead.
+function assertPortFree(port) {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", (e) => {
+      if (e.code === "EADDRINUSE") {
+        reject(new Error(
+          `port ${port} is already in use — kill the stale process first ` +
+          `(e.g. the E2E webServer or a previous sweep server), then re-run. ` +
+          "Measuring against an unknown server would silently poison the census."
+        ));
+      } else reject(e);
+    });
+    probe.once("listening", () => probe.close(() => resolve()));
+    probe.listen(port, "127.0.0.1");
+  });
+}
 
 function waitHealth(url, timeoutMs) {
   const start = Date.now();
@@ -113,14 +135,34 @@ async function pinnedSurfaces(page) {
   const results = {};
   const fs = require("fs");
   const SHOTS = process.argv.includes("--shots");
+  await assertPortFree(3100);
   const server = spawn("node", [".next/standalone/server.js"], {
     cwd: process.cwd(),
     env: { ...process.env, PORT: "3100", NODE_ENV: "production", DATABASE_URL: "file:" + process.cwd() + "/db/custom.db" },
-    stdio: "ignore",
+    // M1: capture stderr so a boot failure prints the server's own error
+    // instead of a bare health timeout; stdout stays drained.
+    stdio: ["ignore", "ignore", "pipe"],
   });
+  const serverErrTail = [];
+  server.stderr.on("data", (d) => {
+    serverErrTail.push(String(d));
+    if (serverErrTail.length > 40) serverErrTail.shift();
+  });
+  server.on("error", (e) => {
+    console.error("SERVER SPAWN ERROR:", e);
+    process.exit(1);
+  });
+  let browser;
   try {
-    await waitHealth(CLONE + "api/health", 30000);
-    const browser = await chromium.launch();
+    try {
+      await waitHealth(CLONE + "api/health", 30000);
+    } catch (e) {
+      if (serverErrTail.length) {
+        console.error("--- server stderr tail ---\n" + serverErrTail.join(""));
+      }
+      throw e;
+    }
+    browser = await chromium.launch();
     const errors = [];
 
     for (const [name, viewport] of [["desktop", { width: 1440, height: 900 }], ["mobile", { width: 390, height: 844 }]]) {
@@ -143,8 +185,7 @@ async function pinnedSurfaces(page) {
           if (side === "clone") {
             if (name === "desktop") {
               await page.screenshot({ path: dir + "clone-home-desktop.png" });
-              fs.copyFileSync(dir + "clone-home-desktop.png", dir + "clone-size-chips.png");
-              // deals section top
+              // deals section top (still on home — the deals h2 lives here)
               await page.evaluate(() => {
                 const h2s = [...document.querySelectorAll("h2")];
                 const deals = h2s.find((h) => /exclusive deals/i.test(h.textContent || ""));
@@ -155,7 +196,15 @@ async function pinnedSurfaces(page) {
               });
               await page.waitForTimeout(400);
               await page.screenshot({ path: dir + "clone-exclusive-deals.png" });
+              // I1 (session-12): capture a REAL size-chips close-up from the
+              // PDP buy panel — the previous byte-copy of the home shot
+              // documented nothing chip-specific.
               await page.goto(CLONE + "product/silk-draped-evening-gown", { waitUntil: "load" });
+              const sizeBlock = page
+                .locator("main div.mb-6")
+                .filter({ has: page.getByRole("button", { name: "Size Guide" }) });
+              await sizeBlock.waitFor({ state: "visible", timeout: 15000 });
+              await sizeBlock.screenshot({ path: dir + "clone-size-chips.png" });
               await scrollAll(page);
               await page.evaluate(() => window.scrollTo(0, 0));
               await page.waitForTimeout(300);
@@ -194,8 +243,11 @@ async function pinnedSurfaces(page) {
       await rctx.close();
     }
     results.consoleErrors = errors.slice(0, 20);
+    // M1: close the browser in the guarded path AND the finally below —
+    // a mid-census throw used to leak the process until exit().
     await browser.close();
   } finally {
+    if (browser) await browser.close().catch(() => {});
     server.kill("SIGKILL");
   }
   require("fs").writeFileSync("/tmp/sweep-results.json", JSON.stringify(results, null, 2));

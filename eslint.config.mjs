@@ -48,6 +48,13 @@ const eslintConfig = [
       // Sandbox tooling (CONNECT forward proxy for headless-Chromium external
       // DNS — sessions 6–8); CommonJS by design, never committed.
       "scripts/forward-proxy.js",
+      // H-70 (session-12): committed CommonJS tooling (the parity sweep
+      // driver boots the standalone as a child process and requires at
+      // top level AND inline). `no-require-imports` guards app source,
+      // where ESM is the contract; .cjs scripts are CommonJS BY EXTENSION
+      // — scope the ignore to the extension, not the whole scripts/ dir,
+      // so any future ESM tooling stays linted.
+      "scripts/**/*.cjs",
     ],
   },
 ];

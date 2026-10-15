@@ -47,12 +47,23 @@ test.describe("product detail", () => {
   // size block via its unique "Size Guide" sibling — the related grid's
   // ProductCards render their own aria-pressed chips and must not leak in.
   // SSR text: no clicking, so no hydration probe needed.
+  //
+  // L1/L2 (session-12): the block-level guard (`toHaveCount(1)`) kills the
+  // vacuous pass — for a hypothetical `sizes: []` product the block never
+  // renders, and BOTH the chip-count (0 === 0) and `toEqual([])` would pass
+  // without the page rendering anything. Asserting the anchor exists keeps
+  // the census loud for that case and for any refactor that moves the
+  // `mb-6` anchor or the Size Guide sibling (the L3 coupling is
+  // loud-by-design). The loop stays one test (a failure at product k
+  // aborts k+1..12 in that run) to keep the documented "66 cases"
+  // arithmetic — revisit only if mid-census triage ever demands it.
   test("size-vocabulary census: every PDP renders its exact catalog size list (H-67)", async ({ page }) => {
     for (const product of CATALOG_PRODUCTS) {
       await page.goto(`/product/${product.slug}`);
       const sizeBlock = page
         .locator("main div.mb-6")
         .filter({ has: page.getByRole("button", { name: "Size Guide" }) });
+      await expect(sizeBlock, `size block on /product/${product.slug}`).toHaveCount(1);
       const chips = sizeBlock.locator("button[aria-pressed]");
       await expect(chips).toHaveCount(product.sizes.length);
       const labels = (await chips.allInnerTexts()).map((s) => s.trim());
