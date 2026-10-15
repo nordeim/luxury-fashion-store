@@ -4,7 +4,9 @@ import path from "node:path";
 // Unit-test layer for the pure domain seams: money math (integer cents,
 // shipping threshold), the schema-relative SQLite URL resolution contract,
 // Zod validation schemas, the login rate limiter, the search-params coercion,
-// the shared image/P2002 helpers, and the delivery-window estimator.
+// the shared image/P2002 helpers, and the delivery-window estimator — plus
+// the sweep-tool primitives contract (tests/unit/sweep-lib.test.ts, H-71:
+// waitHealth's F3/G-2 deadline contract and assertPortFree's M1 diagnostic).
 // Browser/E2E coverage lives in tests/e2e/*.spec.ts (Playwright — never picked
 // up here, this config matches *.test.ts only).
 export default defineConfig({

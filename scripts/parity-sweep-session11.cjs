@@ -6,8 +6,11 @@
  */
 const { chromium } = require("playwright");
 const { spawn } = require("child_process");
-const http = require("http");
-const net = require("net");
+// H-71 (session-15): waitHealth + assertPortFree live in scripts/sweep-lib.cjs
+// (side-effect-free) so tests/unit/sweep-lib.test.ts can pin their hardened
+// deadline contract permanently. Behavior identical to the pre-extraction
+// inline code — round-10a vs 10b census byte-equality is the proof.
+const { assertPortFree, waitHealth } = require("./sweep-lib.cjs");
 
 // F4 (session-13): one port constant — playwright.config.ts honors E2E_PORT,
 // the sweep tool now follows it instead of hardcoding :3100 three times.
@@ -15,63 +18,10 @@ const PORT = Number(process.env.E2E_PORT ?? 3100);
 const REF = "https://pastel-aurelia-fashion-edit.base44.app/";
 const CLONE = `http://127.0.0.1:${PORT}/`;
 
-// M1 (session-12): probe the port BEFORE spawning. A leftover E2E webServer
-// (or any process on :3100) used to make the spawned server die silently
-// while waitHealth probed the OLD build — a confidently wrong census (the
-// trap-#27 failure class). Fail fast with the fix spelled out instead.
-function assertPortFree(port) {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", (e) => {
-      if (e.code === "EADDRINUSE") {
-        reject(new Error(
-          `port ${port} is already in use — kill the stale process first ` +
-          `(e.g. the E2E webServer or a previous sweep server), then re-run. ` +
-          "Measuring against an unknown server would silently poison the census."
-        ));
-      } else reject(e);
-    });
-    probe.once("listening", () => probe.close(() => resolve()));
-    probe.listen(port, "127.0.0.1");
-  });
-}
-
-function waitHealth(url, timeoutMs) {
-  const start = Date.now();
-  return new Promise((resolve, reject) => {
-    const tick = () => {
-      // G-2 (session-14): F3's req.setTimeout is an INACTIVITY deadline — a
-      // socket that never goes idle (a slow-drip responder writing a byte
-      // every <2s) holds the attempt forever: no 'end', no 'error', and the
-      // budget inside retry() is never reached (RED: the sweep hung past its
-      // own timeout; demo killed externally at 12s). Arm an ABSOLUTE
-      // per-attempt deadline as well: the destroy surfaces as 'error' ->
-      // retry -> budget check. 4s > the 2s inactivity deadline, so every
-      // normal failure path (dead socket, EADDRINUSE page) is unchanged.
-      // GREEN: same dribbler, REJECTED at ~8.5s with "server timeout".
-      let settled = false;
-      let req = null;
-      const attemptTimer = setTimeout(() => {
-        if (!settled && req) req.destroy(new Error("attempt deadline"));
-      }, 4000);
-      const settle = () => { settled = true; clearTimeout(attemptTimer); };
-      req = http.get(url, (res) => {
-        res.resume();
-        if (res.statusCode === 200) { settle(); return resolve(); }
-        res.on("end", () => { settle(); retry(); });
-      });
-      // F3 (session-13): per-request INACTIVITY deadline — a socket that
-      // connects but never responds dies here after 2s (-> 'error' -> retry).
-      req.setTimeout(2000, () => req.destroy(new Error("per-request health timeout")));
-      req.on("error", () => { settle(); retry(); });
-    };
-    const retry = () => {
-      if (Date.now() - start > timeoutMs) return reject(new Error("server timeout"));
-      setTimeout(tick, 500);
-    };
-    tick();
-  });
-}
+// M1 (session-12) + F3/G-2 (sessions 13-14) context: assertPortFree and
+// waitHealth moved to scripts/sweep-lib.cjs — H-71, session-15; the
+// extraction is behavior-identical and its hardened deadline contract is now
+// pinned by tests/unit/sweep-lib.test.ts (M1's stale-server probe included).
 
 async function scrollAll(page) {
   await page.evaluate(async () => {

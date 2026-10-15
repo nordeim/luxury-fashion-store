@@ -407,7 +407,7 @@ Hero crossfade `transition-opacity duration-700`, auto-rotate 5000ms; drawers/ov
 
 | Category | Files | Tests | Location | Framework |
 |---|---|---|---|---|
-| Unit (pure seams) | 14 | 113 | `src/lib/*.test.ts` | Vitest (node) |
+| Unit (pure seams) | 15 | 122 | `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` | Vitest (node) |
 | E2E setup | 1 | 1×2 projects | `tests/e2e/auth.setup.ts` | Playwright |
 | E2E functional | 10 | 66 cases × 2 profiles (132 passed + 2 desktop-only skips on mobile) | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
 
@@ -422,7 +422,7 @@ E2E coverage map: home (hero **per-slide anchoring incl. slide-3 center (P-8) + 
 ### 7.3 Pre-Deploy Checklist
 
 ```bash
-npm run verify      # typecheck → lint → 113 unit → production build (+ standalone assembly)
+npm run verify      # typecheck → lint → 122 unit → production build (+ standalone assembly)
 npm run test:e2e    # 66 cases × 2 projects (+2 setup); requires the fresh build
 ```
 
