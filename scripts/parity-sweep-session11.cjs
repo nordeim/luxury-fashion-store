@@ -40,17 +40,30 @@ function waitHealth(url, timeoutMs) {
   const start = Date.now();
   return new Promise((resolve, reject) => {
     const tick = () => {
-      const req = http.get(url, (res) => {
+      // G-2 (session-14): F3's req.setTimeout is an INACTIVITY deadline — a
+      // socket that never goes idle (a slow-drip responder writing a byte
+      // every <2s) holds the attempt forever: no 'end', no 'error', and the
+      // budget inside retry() is never reached (RED: the sweep hung past its
+      // own timeout; demo killed externally at 12s). Arm an ABSOLUTE
+      // per-attempt deadline as well: the destroy surfaces as 'error' ->
+      // retry -> budget check. 4s > the 2s inactivity deadline, so every
+      // normal failure path (dead socket, EADDRINUSE page) is unchanged.
+      // GREEN: same dribbler, REJECTED at ~8.5s with "server timeout".
+      let settled = false;
+      let req = null;
+      const attemptTimer = setTimeout(() => {
+        if (!settled && req) req.destroy(new Error("attempt deadline"));
+      }, 4000);
+      const settle = () => { settled = true; clearTimeout(attemptTimer); };
+      req = http.get(url, (res) => {
         res.resume();
-        if (res.statusCode === 200) return resolve();
-        res.on("end", retry);
+        if (res.statusCode === 200) { settle(); return resolve(); }
+        res.on("end", () => { settle(); retry(); });
       });
-      // F3 (session-13): the 30s budget was only evaluated ACROSS retries —
-      // a socket that connects but never responds left a request pending
-      // forever and the sweep hung past its own timeout. Give each request
-      // its own deadline; the destroy surfaces as an 'error' -> retry.
+      // F3 (session-13): per-request INACTIVITY deadline — a socket that
+      // connects but never responds dies here after 2s (-> 'error' -> retry).
       req.setTimeout(2000, () => req.destroy(new Error("per-request health timeout")));
-      req.on("error", retry);
+      req.on("error", () => { settle(); retry(); });
     };
     const retry = () => {
       if (Date.now() - start > timeoutMs) return reject(new Error("server timeout"));

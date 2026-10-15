@@ -1,7 +1,7 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.7.1
+version: 1.7.2
 last_updated: 2026-10-15
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
 project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 113/113 unit (14 files) ✓ build ✓ E2E 132 passed + 2 skipped (66 unique cases × chromium+mobile, two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
@@ -14,7 +14,7 @@ reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only protot
 > against source at distillation time (v1.0.0). Companion docs: `AGENTS.md`
 > (commands/env quick reference), `CLAUDE.md` (working standards),
 > `Project_Architecture_Document.md` (deep architecture + ADRs),
-> `docs/remediation-plan-session8.md` (latest remediation ledger).
+> per-session remediation ledgers `docs/remediation-plan-session<N>.md` (the highest N is latest).
 
 ---
 
@@ -820,8 +820,8 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Commands & env | `AGENTS.md` |
 | Working standards | `CLAUDE.md` |
 | Deep architecture + ADRs | `Project_Architecture_Document.md` |
-| Latest remediation ledger | `docs/remediation-plan-session9.md` |
-| Session history | `docs/session_1.md` … `session_8.md`, `worklog.md` |
+| Per-session remediation ledgers | `docs/remediation-plan-session<N>.md` (highest N is latest) |
+| Session history | `docs/session_<N>.md` (per-session transcripts) + `worklog.md` |
 | Parity screenshots | `docs/screenshots/` |
 | Mutation seam | `src/lib/actions/*.ts` |
 | Envelope | `src/lib/action-result.ts` |
