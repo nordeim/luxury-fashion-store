@@ -3,6 +3,12 @@
  * L-1 (session-17): coverage extended to the surfaces the first cut missed —
  * the logged-out /register + /wishlist, and the LOGGED-IN account / wishlist
  * (with one heart) / cart (with one line) surfaces.
+ * M-1/L-3 (session-18): coverage extended behind the ADMIN role wall — the
+ * admin session is MINTED OFFLINE (a session-row SQL fixture + an HMAC
+ * computed with the same E2E_AUTH_SECRET the webServer carries) so the gate
+ * consumes ZERO login budget; it immediately measured a real serious-class
+ * violation class on /admin/products (the visibility toggle's aria-label
+ * omitted the visible state word — trap #32).
  *
  * Residual #7 (carried since session 11) said: `axe-core` is an unused
  * devDependency — adopt for automated a11y audits or remove. This spec is the
@@ -24,10 +30,17 @@
  * once by the setup projects) — ZERO extra logins, zero rate-budget
  * consumption. The two stateful surfaces create their own fixture state
  * (one wishlist heart / one cart line via the PDP) and clean up after
- * themselves (suite-wide shared-DB discipline).
+ * themselves (suite-wide shared-DB discipline). The admin surfaces mint a
+ * session ROW via SQL (the H-2 `prisma db execute` pattern) — no login call
+ * ever happens, so the exactly-consumed admin bucket (SKILL §9 #23) is left
+ * untouched, and the row is deleted again in afterAll.
  */
 import { expect, test } from "@playwright/test";
+import { execSync } from "node:child_process";
+import { randomBytes, createHmac } from "node:crypto";
+import { writeFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
+import { E2E_AUTH_SECRET } from "./e2e-secrets";
 
 const AXE_SRC = path.join(process.cwd(), "node_modules", "axe-core", "axe.min.js");
 
@@ -121,6 +134,92 @@ test.describe("accessibility axe gate (K-1 + L-1)", () => {
           await expect(page.getByTestId("cart-line")).toHaveCount(lineCount - 1, { timeout: 10_000 });
         }
       }
+    });
+  });
+
+  test.describe("admin surfaces (SQL-minted admin session — zero logins)", () => {
+    // M-1/L-3 (session-18): the axe gate now audits the surfaces behind the
+    // admin role wall WITHOUT a single login call — the exactly-consumed
+    // admin bucket (SKILL §9 #23) stays untouched. The session cookie is
+    // minted offline: a random 256-bit token, HMAC'd with the SAME
+    // E2E_AUTH_SECRET the webServer env carries (e2e-secrets.ts), backed by a
+    // Session row inserted via `prisma db execute` against db/e2e.db (the
+    // proven H-2 fixture pattern). Verification in src/lib/auth.ts checks the
+    // HMAC before any DB hit, and the row lookup resolves to the seeded
+    // admin user — the request is indistinguishable from a logged-in admin.
+    const ADMIN_TOKEN = randomBytes(32).toString("hex");
+    const adminStorageState = {
+      cookies: [
+        {
+          name: "aurelia_session",
+          value: `${ADMIN_TOKEN}.${createHmac("sha256", E2E_AUTH_SECRET)
+            .update(ADMIN_TOKEN)
+            .digest("base64url")}`,
+          domain: "localhost",
+          path: "/",
+          httpOnly: true,
+          secure: false, // http://localhost — matches the setup projects' minted cookies
+          sameSite: "Lax" as const,
+          expires: Math.floor(Date.now() / 1000) + 86_400,
+        },
+      ],
+      origins: [],
+    };
+
+    test.use({ storageState: adminStorageState });
+
+    function adminSqlRun(sql: string) {
+      const file = path.join(process.cwd(), "tests", "e2e", ".admin-axe-session.sql");
+      writeFileSync(file, sql);
+      execSync(`npx prisma db execute --schema ${path.join(process.cwd(), "prisma", "schema.prisma")} --file ${file}`, {
+        env: { ...process.env, DATABASE_URL: `file:${path.join(process.cwd(), "db", "e2e.db")}` },
+        stdio: "pipe",
+      });
+      unlinkSync(file);
+    }
+
+    test.beforeAll(() => {
+      // INSERT ... SELECT: the seeded admin's id is resolved by the DB itself
+      // (never hardcoded). Re-runs are idempotent (delete-then-insert), and
+      // global-setup wipes every session row before each full suite anyway.
+      adminSqlRun(
+        `DELETE FROM "Session" WHERE token = '${ADMIN_TOKEN}';\n` +
+          `INSERT INTO "Session" (id, token, "userId", "expiresAt", "createdAt") ` +
+          `SELECT 'admin-axe-gate-session', '${ADMIN_TOKEN}', id, datetime('now', '+1 day'), datetime('now') ` +
+          `FROM "User" WHERE email = 'admin@aurelia.com';`
+      );
+    });
+
+    test.afterAll(() => {
+      // Self-cleaning (suite hygiene): the minted row dies with the group.
+      adminSqlRun(`DELETE FROM "Session" WHERE token = '${ADMIN_TOKEN}';`);
+    });
+
+    const ADMIN_SURFACES: Array<[string, string]> = [
+      ["/admin", "admin dashboard"],
+      ["/admin/products", "admin products"],
+      ["/admin/orders", "admin orders"],
+    ];
+
+    for (const [route, name] of ADMIN_SURFACES) {
+      test(`zero WCAG 2.0/2.1 A+AA violations on ${name}`, async ({ page }) => {
+        await page.goto(route, { waitUntil: "load" });
+        const summary = await axeSummary(page);
+        expect(summary, `axe violations on ${name}: ${summary.join(", ")}`).toEqual([]);
+      });
+    }
+
+    test("zero violations on admin order detail", async ({ page }) => {
+      // The canonical seed always leaves 4 orders — navigate through the
+      // first detail link rather than hardcoding a cuid (L-2's lesson).
+      await page.goto("/admin/orders", { waitUntil: "load" });
+      const first = page.locator('a[href^="/admin/orders/"]').first();
+      await expect(first).toBeVisible();
+      const href = await first.getAttribute("href");
+      expect(href, "admin order detail link href").toBeTruthy();
+      await page.goto(href as string, { waitUntil: "load" });
+      const summary = await axeSummary(page);
+      expect(summary, `axe violations on admin order detail: ${summary.join(", ")}`).toEqual([]);
     });
   });
 });

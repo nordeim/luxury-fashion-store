@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
+// M-1/L-3 (session-18): the AUTH_SECRET moved to one shared constant so the
+// accessibility-axe gate can mint admin session cookies OFFLINE (HMAC with the
+// same secret) — the value is byte-identical to the previously inlined string.
+import { E2E_AUTH_SECRET } from "./tests/e2e/e2e-secrets";
 
 // E2E layer: boots the PRODUCTION standalone server on an isolated port with
 // its own scratch database (db/e2e.db, schema-pushed + seeded by the global
@@ -92,7 +96,7 @@ export default defineConfig({
       PORT: String(PORT),
       NODE_ENV: "production",
       DATABASE_URL: E2E_DATABASE_URL,
-      AUTH_SECRET: "playwright-e2e-session-secret",
+      AUTH_SECRET: E2E_AUTH_SECRET,
     } as Record<string, string>,
   },
 });

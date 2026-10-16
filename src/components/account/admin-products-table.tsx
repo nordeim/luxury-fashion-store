@@ -82,7 +82,13 @@ export function AdminProductsTable({ products }: { products: AdminProductRow[] }
               <button
                 type="button"
                 onClick={() => toggleVisibility(p.id, p.isActive)}
-                aria-label={p.isActive ? `Hide ${p.name}` : `Show ${p.name}`}
+                // M-1 (session-18): the state word IS visible text — WCAG 2.5.3
+                // Label-in-Name (axe label-content-name-mismatch) requires the
+                // accessible name to contain it. Fold it in ("Visible, hide
+                // <name>" / "Hidden, show <name>"); Playwright's role-name
+                // matching stays substring so the H-7 pin is unaffected. Zero
+                // visual change. (Trap #32; verified against axe-core 4.10.)
+                aria-label={p.isActive ? `Visible, hide ${p.name}` : `Hidden, show ${p.name}`}
                 className={`flex items-center gap-1.5 text-[10px] tracking-wider uppercase font-montserrat ${p.isActive ? "text-muted-foreground hover:text-foreground" : "text-red-600 hover:text-red-700"}`}
               >
                 {p.isActive ? <Eye size={13} /> : <EyeOff size={13} />}
