@@ -57,4 +57,4 @@ Production luxury-fashion e-commerce storefront + admin console: **Next.js 16.4 
 ## Build & deploy
 
 - `next build` emits the standalone server, then `scripts/assemble-standalone.mjs` copies `.next/static` + `public/` into `.next/standalone/` — the step the Next.js docs require and the build does NOT do. Skipping it yields SSR-perfect pages whose chunks 404 (zero hydration — every click inert).
-- Security headers (Referrer-Policy, nosniff, HSTS, X-Frame-Options: DENY) ship from `next.config.ts`.
+- Security headers (Referrer-Policy, nosniff, HSTS, X-Frame-Options: DENY) ship from `next.config.ts`; the CSP is minted per-request with a nonce by `src/proxy.ts` (production `script-src 'self' 'nonce-…'` — no `unsafe-inline`; directives unit-pinned in `src/lib/csp.ts`, E2E-gated by `tests/e2e/security-csp.spec.ts`; dev keeps the React-runtime `unsafe-eval` escape hatch).

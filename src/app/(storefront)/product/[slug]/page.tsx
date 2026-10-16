@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { toProductCardData } from "@/lib/products";
 import { estimateDelivery } from "@/lib/delivery";
+import { productJsonLd } from "@/lib/structured-data";
 import { ProductDetail } from "@/components/store/product-detail";
 
 // PDP — functional superset (reference /product/* 404s). Same design
@@ -40,14 +41,30 @@ export default async function ProductPage({ params }: ProductPageProps) {
     take: 4,
   });
 
+  const card = toProductCardData(product);
+  // F-B (session-19): the README has documented the PDP's JSON-LD since the
+  // first release — this data block finally ships it. Non-executing data
+  // blocks are exempt from CSP script-src (no nonce needed) and are
+  // invisible to the resting census.
+  const jsonLd = productJsonLd(
+    card,
+    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
+  );
+
   return (
-    <ProductDetail
-      product={toProductCardData(product)}
-      related={related.map(toProductCardData)}
-      // H-37 (session-6): single clock — the label is computed here (server)
-      // and passed down, instead of each render environment calling
-      // estimateDelivery() with its own `new Date()`.
-      deliveryLabel={estimateDelivery().label}
-    />
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <ProductDetail
+        product={card}
+        related={related.map(toProductCardData)}
+        // H-37 (session-6): single clock — the label is computed here (server)
+        // and passed down, instead of each render environment calling
+        // estimateDelivery() with its own `new Date()`.
+        deliveryLabel={estimateDelivery().label}
+      />
+    </>
   );
 }

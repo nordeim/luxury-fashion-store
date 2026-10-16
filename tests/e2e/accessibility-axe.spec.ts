@@ -72,6 +72,12 @@ async function axeSummary(page: import("@playwright/test").Page): Promise<string
 }
 
 test.describe("accessibility axe gate (K-1 + L-1)", () => {
+  // N-1 (session-19): the production CSP is nonce-only — the axe SCRIPT this
+  // gate injects (test harness, not app code) has no nonce, so the context
+  // opts out of CSP enforcement. Nothing else relies on it; every app-level
+  // script carries the proxy's nonce (security-csp.spec.ts pins that).
+  test.use({ bypassCSP: true });
+
   test.describe("logged-out surfaces (empty storageState)", () => {
     test.use({ storageState: { cookies: [], origins: [] } });
 
@@ -180,12 +186,14 @@ test.describe("accessibility axe gate (K-1 + L-1)", () => {
 
     test.beforeAll(() => {
       // INSERT ... SELECT: the seeded admin's id is resolved by the DB itself
-      // (never hardcoded). Re-runs are idempotent (delete-then-insert), and
-      // global-setup wipes every session row before each full suite anyway.
+      // (never hardcoded). The session id is derived from the per-run token
+      // (F-A, session-19) — collision-free even if two projects ever ran
+      // concurrently (workers > 1); re-runs are idempotent (delete-then-insert),
+      // and global-setup wipes every session row before each full suite anyway.
       adminSqlRun(
         `DELETE FROM "Session" WHERE token = '${ADMIN_TOKEN}';\n` +
           `INSERT INTO "Session" (id, token, "userId", "expiresAt", "createdAt") ` +
-          `SELECT 'admin-axe-gate-session', '${ADMIN_TOKEN}', id, datetime('now', '+1 day'), datetime('now') ` +
+          `SELECT 'admin-axe-gate-' || '${ADMIN_TOKEN}', '${ADMIN_TOKEN}', id, datetime('now', '+1 day'), datetime('now') ` +
           `FROM "User" WHERE email = 'admin@aurelia.com';`
       );
     });
