@@ -108,7 +108,17 @@ export function Header() {
               </button>
               <Link
                 href="/wishlist"
-                aria-label="Wishlist"
+                // L-1 (session-17): when the count badge renders, its digits
+                // are VISIBLE TEXT — WCAG 2.5.3 Label-in-Name (axe
+                // label-content-name-mismatch) requires the accessible name
+                // to contain them. Fold the count into the label at rest
+                // parity ("Wishlist") and announcement quality ("Wishlist,
+                // 2 items"). Zero visual change.
+                aria-label={
+                  wishlist.size > 0
+                    ? `Wishlist, ${wishlist.size} ${wishlist.size === 1 ? "item" : "items"}`
+                    : "Wishlist"
+                }
                 className="relative text-foreground hover:text-gold transition-colors"
               >
                 <Heart size={18} strokeWidth={1.8} />
@@ -120,7 +130,15 @@ export function Header() {
               </Link>
               <button
                 type="button"
-                aria-label="Shopping bag"
+                // L-1 (session-17): same Label-in-Name class as the wishlist
+                // heart — the badge count is visible text, so the accessible
+                // name must contain it whenever the badge renders. Zero
+                // visual change (attribute-level semantics only).
+                aria-label={
+                  cart.count > 0
+                    ? `Shopping bag, ${cart.count} ${cart.count === 1 ? "item" : "items"}`
+                    : "Shopping bag"
+                }
                 onClick={() => setCartOpen(true)}
                 className="relative text-foreground hover:text-gold transition-colors"
               >
