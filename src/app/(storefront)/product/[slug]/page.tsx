@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { toProductCardData } from "@/lib/products";
 import { estimateDelivery } from "@/lib/delivery";
-import { productJsonLd } from "@/lib/structured-data";
+import { productJsonLd, serializeJsonLd } from "@/lib/structured-data";
 import { ProductDetail } from "@/components/store/product-detail";
 
 // PDP — functional superset (reference /product/* 404s). Same design
@@ -55,7 +55,13 @@ export default async function ProductPage({ params }: ProductPageProps) {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        // F-D (session-20): the ONLY dangerouslySetInnerHTML in the codebase
+        // embeds HTML-safely — serializeJsonLd escapes `<` (and the U+2028/
+        // U+2029 separators) so a `</script>` sequence inside any future
+        // product string can never terminate the data block early. On the
+        // current seed the output is byte-identical to JSON.stringify
+        // (unit-pinned rest-invariance contract).
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
       <ProductDetail
         product={card}

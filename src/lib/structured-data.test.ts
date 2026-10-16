@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { productJsonLd } from "./structured-data";
+import { productJsonLd, serializeJsonLd } from "./structured-data";
 import type { ProductCardData } from "./products";
 
 // F-B (session-19): the README has documented the PDP's JSON-LD since the
@@ -71,5 +71,48 @@ describe("productJsonLd", () => {
       "https://aurelia.example"
     );
     expect(rel.image).toEqual(["https://aurelia.example/img/gown.jpg"]);
+  });
+});
+
+// F-D (session-20): the PDP embeds the JSON-LD via dangerouslySetInnerHTML —
+// the codebase's ONLY raw-HTML sink. JSON.stringify output is JS-safe but
+// NOT HTML-safe: a `</script>` sequence inside any future string value
+// would terminate the data block early and inject markup. serializeJsonLd
+// is the OWASP-recommended HTML-safe embedding: `<` → \u003c plus the
+// U+2028/U+2029 line separators, byte-identical to plain stringify on
+// current seed data (no escapable characters exist).
+describe("serializeJsonLd", () => {
+  it("escapes < so a </script> payload can never break out of the data block", () => {
+    const hostile = productJsonLd(
+      {
+        ...FIXTURE,
+        name: '</script><img src=x onerror=alert(1)>',
+        description: "a < b and </scr<script>ipt>",
+      },
+      "https://aurelia.example"
+    );
+    const html = serializeJsonLd(hostile);
+    expect(html).not.toContain("</script");
+    expect(html).not.toContain("<img");
+    expect(html).toContain("\\u003c/script>");
+  });
+
+  it("escapes the U+2028/U+2029 line separators (safe if ever inlined into a classic script)", () => {
+    const html = serializeJsonLd({ name: "a b c" });
+    expect(html).not.toContain(" ");
+    expect(html).not.toContain(" ");
+    expect(html).toContain("\\u2028");
+    expect(html).toContain("\\u2029");
+  });
+
+  it("round-trips through JSON.parse unchanged (data, not shape, is serialized)", () => {
+    const ld = productJsonLd(FIXTURE, "https://aurelia.example");
+    const parsed = JSON.parse(serializeJsonLd(ld)) as typeof ld;
+    expect(parsed).toEqual(ld);
+  });
+
+  it("is byte-identical to plain JSON.stringify on current seed data (rest-invariance contract)", () => {
+    const ld = productJsonLd(FIXTURE, "https://aurelia.example");
+    expect(serializeJsonLd(ld)).toBe(JSON.stringify(ld));
   });
 });

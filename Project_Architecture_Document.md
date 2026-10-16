@@ -401,7 +401,7 @@ Hero crossfade `transition-opacity duration-700`, auto-rotate 5000ms; drawers/ov
 | Session theft | httpOnly + sameSite=lax + secure(prod) + HMAC integrity |
 | CSRF on mutations | Next server actions' origin-checked POST + sameSite cookies |
 | IDOR on orders | owner (userId) or HMAC view token; admin role re-checked per request |
-| XSS | React escaping; the ONLY `dangerouslySetInnerHTML` is the PDP's JSON-LD data block built from trusted seeded catalog data via `src/lib/structured-data.ts` (`JSON.stringify` of a typed object — no user input; data blocks are non-executing and CSP-exempt); inline-script execution further blocked by the nonce CSP |
+| XSS | React escaping; the ONLY `dangerouslySetInnerHTML` is the PDP's JSON-LD data block built from trusted seeded catalog data via `src/lib/structured-data.ts` — embedded HTML-SAFELY since F-D (session-20): `serializeJsonLd` escapes `<` (and U+2028/U+2029) so a `</script>` sequence can never terminate the data block early, byte-identical to `JSON.stringify` on current seed data (unit-pinned); data blocks are non-executing and CSP-exempt; inline-script execution further blocked by the nonce CSP |
 | SQL injection | Prisma parameterized queries only |
 | Open redirect at login | `validateRedirectPath` allowlist |
 
@@ -411,7 +411,7 @@ Hero crossfade `transition-opacity duration-700`, auto-rotate 5000ms; drawers/ov
 
 | Category | Files | Tests | Location | Framework |
 |---|---|---|---|---|
-| Unit (pure seams) | 17 | 138 | `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` | Vitest (node) |
+| Unit (pure seams) | 17 | 142 | `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` | Vitest (node) |
 | E2E setup | 1 | 1×2 projects | `tests/e2e/auth.setup.ts` | Playwright |
 | E2E functional | 12 | 85 cases × 2 profiles (170 passed + 2 desktop-only skips on mobile) | `tests/e2e/*.spec.ts` | Playwright (chromium + iPhone-14 profiles) |
 

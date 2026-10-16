@@ -55,3 +55,20 @@ export function productJsonLd(product: ProductCardData, origin: string): Product
     },
   };
 }
+
+// F-D (session-20): HTML-safe JSON embedding for the PDP's data block — the
+// codebase's ONLY dangerouslySetInnerHTML. JSON.stringify output is JS-safe
+// but NOT HTML-safe: the HTML parser (not the JS engine) terminates a
+// <script> element at the first `</script` sequence, even inside a JSON
+// string, so a hostile future product string could break out of the data
+// block. The OWASP-recommended hardening: escape `<` after stringify; the
+// U+2028/U+2029 line separators ride along (irrelevant inside a data block,
+// mandatory if the value is ever inlined into a classic script). On the
+// current seed the mapping is the identity — no escapable characters exist —
+// so the embedded bytes are unchanged (rest-invariance, unit-pinned).
+export function serializeJsonLd(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
