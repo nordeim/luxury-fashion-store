@@ -1,10 +1,10 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.13.0
+version: 1.14.0
 last_updated: 2026-10-16
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
-project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 142/142 unit (17 files) ✓ build ✓ E2E 170 passed + 2 skipped (85 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, and the N-1/F-B CSP+JSON-LD gate — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
+project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 142/142 unit (17 files) ✓ build ✓ E2E 178 passed + 2 skipped (89 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, the N-1/F-B CSP+JSON-LD gate, and the session-21 action-seam security gate — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
 reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only prototype (inert commerce buttons). This repo is its functional superset with resting-state visual parity."
 ---
 
@@ -94,7 +94,7 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
 | Unit tests | Vitest (node env) | 3.2.7 | 142 tests (17 files: `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` — H-71 added the sweep-tool contract suite; N-1/F-B added `csp` + `structured-data`; F-D added the `serializeJsonLd` contract) |
-| E2E | Playwright (standalone server) | 1.64.0 | 85 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — and the security-csp gate — N-1/F-B) |
+| E2E | Playwright (standalone server) | 1.64.0 | 89 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — the security-csp gate — N-1/F-B — and the action-seam security gate — session-21, H-59 closed over the wire) |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -563,6 +563,16 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
     with the Playwright context option `bypassCSP: true` — harness code is
     not app code and carries no nonce.
 
+34. **[MEDIUM] `execSync` routes the command through a shell — every `$`
+    in the string is a shell expansion.** Session-21's action-seam spec
+    embedded `p.$disconnect()` inside a `node -e "…"` string passed to
+    `execSync`; the shell expanded `$disconnect` to EMPTY (`p.()`) and the
+    script died with `SyntaxError: Unexpected token '('` — while looking
+    like a Prisma bug. Fix: `spawnSync(cmd, [args-array])` — no shell, no
+    expansion — for every helper that interpolates JS/SQL containing `$`.
+    Same family as trap #13 (the loader quirks): child processes are a
+    boundary; pass ARGV, not shell text.
+
 ## §10 Debugging Guide (symptom → cause → fix)
 
 | Symptom | Root cause | Fix |
@@ -573,6 +583,7 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
 | Every COD checkout fails validation; card checkout can't pass Luhn | `FormData.get()` → `null` vs `optional()`; DOM-held wizard state | `?? undefined` coercion at the action seam; keep card fields in React state |
 | E2E: auth passes in one spec, later specs see "Sign in" header | Logout spec destroyed the shared server-side session | Per-project `storageState` files; specs needing logged-out surfaces opt out explicitly |
 | E2E webServer: Prisma can't open DB | Relative URL re-anchored inside standalone | Absolute `file:` path in webServer env (pass-through in `db-path.ts`) |
+| A spec's `node -e` child dies with `SyntaxError: Unexpected token '('` on a line that reads `p.()` | `execSync` shell-expanded `$disconnect` to empty (§9 #34) | `spawnSync(cmd, [args-array])` — no shell, no expansion |
 | Sections/borders invisible on parity surfaces | Bare HSL triplets in `@theme` | Convert to full `hsl()` literals (§4) |
 | Mobile menu rows collapse/overlap | `space-y-*` under v4 | `flex flex-col gap-5` (already pinned by spec — don't regress) |
 | Cart badge stale after an action | Client didn't re-sync from action DTO | Return the DTO; merge in `StoreProvider` (§6 pattern 1) |
@@ -597,7 +608,7 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
 
 ```bash
 npm run verify                      # typecheck → lint → 142 unit → build (+ assemble)
-npm run test:e2e                    # 85 cases × 2 projects (+2 setup; build FIRST — §9 #16)
+npm run test:e2e                    # 89 cases × 2 projects (+2 setup; build FIRST — §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present, nonce'd (no unsafe-inline/eval in prod)
 
 # Parity pins
@@ -921,6 +932,7 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Automated a11y gate (K-1/L-1/M-1) | `tests/e2e/accessibility-axe.spec.ts` (axe-core; 14 surfaces incl. logged-in + SQL-minted admin, self-cleaning; zero WCAG 2.0/2.1 A+AA violations, color-contrast excluded by parity law; `bypassCSP` for the harness injection) + `tests/e2e/e2e-secrets.ts` (the shared offline-HMAC secret) |
 | Security CSP seam (N-1) | `src/proxy.ts` (per-request nonce, request+response headers) + `src/lib/csp.ts` (pure directives, unit-pinned) + `tests/e2e/security-csp.spec.ts` (header shape, nonce-in-bytes, hydration, route coverage, JSON-LD) |
 | Product JSON-LD (F-B) | `src/lib/structured-data.ts` (`productJsonLd` pure + `serializeJsonLd` — the F-D HTML-safe embedding) + the PDP page's data block (non-executing — CSP-exempt, census-invisible; the codebase's ONLY `dangerouslySetInnerHTML`) |
+| Action-seam security gate (session-21, H-59) | `tests/e2e/action-seam-security.spec.ts` — drives the PDP's server actions by direct POST (`Next-Action: <id>` + a JSON-array body; ids read from the standalone's per-route `server-reference-manifest.json` — the build-shape canary); the WRITE-FREE probe ladder (P1 classify → P2 split → P3 the H-59 payload) proves a foreign size is rejected over the wire with zero Set-Cookie and zero rows; the IDOR census proves a SQL-fixture guest bag line survives unauthenticated cart-line probes; the fail-closed census sweeps every candidate × write-free payload (always 200 + ok:false, never 5xx, never Set-Cookie) |
 | Sale countdown seam | `src/lib/countdown.ts` + `src/components/store/sale-countdown.tsx` |
 | Catalog source of truth | `src/lib/data/catalog.ts` (incl. HERO_SLIDES.align + BRAND_MARQUEE + COLOR_HEX) |
 | Seed | `prisma/seed.ts` (`npm run db:setup`) |
