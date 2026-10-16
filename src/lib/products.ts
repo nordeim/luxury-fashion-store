@@ -27,6 +27,22 @@ export interface ProductCardData {
 
 type ProductWithCategory = Prisma.ProductGetPayload<{ include: { category: true } }>;
 
+/**
+ * Defensively parse the product-images JSON column into URL strings
+ * (session-24, F-K2: the PDP's og:image reads the first entry). Malformed
+ * JSON, non-arrays, and non-string entries degrade to an empty array — the
+ * metadata path falls back to the root share card, never throws.
+ */
+export function parseProductImages(json: string): string[] {
+  try {
+    const value: unknown = JSON.parse(json);
+    if (!Array.isArray(value)) return [];
+    return value.filter((v): v is string => typeof v === "string" && v.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 /** Parse a DB product row (JSON string columns) into the DTO. */
 export function toProductCardData(p: ProductWithCategory): ProductCardData {
   const parse = (json: string, fallback: string[] = []) => {

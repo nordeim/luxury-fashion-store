@@ -49,6 +49,20 @@ const nextConfig: NextConfig = {
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
         ],
       },
+      // F-M (session-24): the self-hosted font binaries are immutable —
+      // content-addressed by filename, never rewritten in place. Without this
+      // they ship `max-age=0` and every visit re-downloads all twelve woff2
+      // files. Root-relative `public/fonts/` paths only (not `/_next/static`,
+      // which Next already caches immutable).
+      {
+        source: "/fonts/:file*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
     ];
   },
 };

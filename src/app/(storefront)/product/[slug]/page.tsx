@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { toProductCardData } from "@/lib/products";
+import { parseProductImages, toProductCardData } from "@/lib/products";
 import { estimateDelivery } from "@/lib/delivery";
 import { productJsonLd, serializeJsonLd } from "@/lib/structured-data";
 import { ProductDetail } from "@/components/store/product-detail";
@@ -19,10 +19,16 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
   const { slug } = await params;
   const product = await db.product.findUnique({ where: { slug } });
   if (!product) return { title: "Product Not Found" };
+  // F-K2 (session-24): per-product share cards — the og/twitter image is the
+  // piece's first catalog photograph (zero new assets; the CDN is already
+  // allowed by images.remotePatterns). Inherits the root card as fallback
+  // semantics via metadataBase resolution.
+  const images = parseProductImages(product.images);
   return {
     title: product.name,
     description: product.description,
     alternates: { canonical: `/product/${product.slug}` },
+    openGraph: images.length > 0 ? { images: [{ url: images[0] }] } : undefined,
   };
 }
 

@@ -1,10 +1,10 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.16.0
+version: 1.17.0
 last_updated: 2026-10-17
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
-project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 154/154 unit (18 files) ✓ build ✓ E2E 186 passed + 2 skipped (93 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, the N-1/F-B CSP+JSON-LD gate, the session-21 action-seam security gate, the session-22 SEO metadata gate, and the session-23 failure-surfaces gate — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
+project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 160/160 unit (19 files) ✓ build ✓ E2E 198 passed + 2 skipped (99 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, the N-1/F-B CSP+JSON-LD gate, the session-21 action-seam security gate, the session-22 SEO metadata gate, the session-23 failure-surfaces gate, and the session-24 brand-metadata gate — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Brand assets: swan mark (icon.svg/favicon.ico/apple-icon), 1200×630 og card, PWA manifest. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
 reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only prototype (inert commerce buttons). This repo is its functional superset with resting-state visual parity."
 ---
 
@@ -93,8 +93,8 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | Styling | Tailwind CSS (CSS-first `@theme`) | 4.3.3 | v4 traps — see §9 #1–#2 |
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
-| Unit tests | Vitest (node env) | 3.2.7 | 154 tests (18 files: `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` — H-71 added the sweep-tool contract suite; N-1/F-B added `csp` + `structured-data`; F-D added the `serializeJsonLd` contract; F-H added the sitemap/robots SEO contract; F-J added the `isSchemaNotReady` boot-race classifier) |
-| E2E | Playwright (standalone server) | 1.64.0 | 93 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — the security-csp gate — N-1/F-B — the action-seam security gate — session-21, H-59 closed over the wire — the SEO metadata gate — session-22, F-H — and the failure-surfaces gate — session-23, F-I2 + the RSC fallback contract) |
+| Unit tests | Vitest (node env) | 3.2.7 | 160 tests (19 files: `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` — H-71 added the sweep-tool contract suite; N-1/F-B added `csp` + `structured-data`; F-D added the `serializeJsonLd` contract; F-H added the sitemap/robots SEO contract; F-J added the `isSchemaNotReady` boot-race classifier; F-L added the `buildManifest` installability contract) |
+| E2E | Playwright (standalone server) | 1.64.0 | 99 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — the security-csp gate — N-1/F-B — the action-seam security gate — session-21, H-59 closed over the wire — the SEO metadata gate — session-22, F-H — the failure-surfaces gate — session-23, F-I2 + the RSC fallback contract — and the brand-metadata gate — session-24, F-K/F-K2/F-L/F-M: the swan mark, the og share card, the manifest body, the font cache) |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -188,6 +188,15 @@ src/app/
   not-found.tsx               measured 404 card (chrome-less slate)
   error.tsx | global-error.tsx  ← F-I boundaries: segment + ROOT (global-error
                               renders its own <html>/<body> + imports globals.css)
+  icon.svg | favicon.ico | apple-icon.png   ← F-K: the swan mark (measured
+                              #404040 circle + #F4ECD6 swan; rendered by
+                              scripts/brand-assets.cjs + scripts/png-to-ico.py)
+  opengraph-image.png         ← F-K2: the 1200×630 share card (auto-injects
+                              og:image + twitter:image on every route)
+  manifest.ts                 ← F-L: static metadata route (buildManifest seam,
+                              origin-independent, DB-free — NOT force-dynamic)
+  robots.ts | sitemap.ts      F-H metadata routes (force-dynamic — the sitemap
+                              reads the catalog)
   (auth)/login | register   measured slate-card auth surfaces (no chrome)
   (storefront)/             chrome composition point (header/footer/nav/drawers)
     layout.tsx                ← header, mobile nav, cart drawer, search, footer, StoreProvider
@@ -620,6 +629,18 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
     (`getByText(/^size$/i)`) whenever the visible casing comes from CSS —
     the same measured-vs-DOM distinction as trap #22 (oklab serialization).
 
+39. **[MEDIUM] `git checkout <untracked-file>` is a SILENT NO-OP — the
+    mutation survives while you believe you restored.** Session-24's first
+    mutation demo (unit seam) was "restored" with `git checkout
+    src/lib/manifest.ts` — but that file was NEW (never committed), so
+    checkout failed with a pathspec error that a `|| true` swallowed and
+    the `display: "browser"` mutation STAYED in the tree. Trap #37's rule
+    (inverse edits, never checkout) applies double to untracked files:
+    checkout can't even fail loudly. Fix: restore by inverse edit ALWAYS;
+    after every demo, `rg` the mutated line and confirm the original value
+    BEFORE moving on (a follow-up `vitest run` of the touched file is the
+    cheap verifier).
+
 ## §10 Debugging Guide (symptom → cause → fix)
 
 | Symptom | Root cause | Fix |
@@ -635,6 +656,7 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
 | E2E setups fail against a server you never booted; :3100 answers with a broken DB | A killed wrapper's `next-server` child — or ANY stale listener, e.g. a manual spike server — still holds the port (§9 #36); `reuseExistingServer` adopted it | `ss -tlnp | rg :3100` → kill the LISTENING pid (its cmdline is `next-server (v…)` or the script path) |
 | A one-line mutation demo "restored" by `git checkout` drops the file to RED and the next build fails on a missing export | `git checkout` reverted the session's OWN uncommitted work in that file (§9 #37) | Apply the inverse edit instead; `rg` for the session's marker comments before rebuilding |
 | A locator on an uppercase label (`SIZE`) finds nothing though the spike's innerText showed it | CSS `text-transform` — `getByText` matches DOM text (`Size`), not rendered casing (§9 #38) | Case-insensitive regex locator (`/^size$/i`) |
+| A mutation demo in a NEW file "restores" cleanly but the mutation is still in the tree | `git checkout` no-ops on untracked files (§9 #39) — the pathspec error was swallowed | Inverse edit; `rg` the mutated line for the original value; re-run the touched test file |
 | Sections/borders invisible on parity surfaces | Bare HSL triplets in `@theme` | Convert to full `hsl()` literals (§4) |
 | Mobile menu rows collapse/overlap | `space-y-*` under v4 | `flex flex-col gap-5` (already pinned by spec — don't regress) |
 | Cart badge stale after an action | Client didn't re-sync from action DTO | Return the DTO; merge in `StoreProvider` (§6 pattern 1) |
@@ -658,8 +680,8 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
 ## §11 Pre-Ship Checklist
 
 ```bash
-npm run verify                      # typecheck → lint → 154 unit → build (+ assemble)
-npm run test:e2e                    # 93 cases × 2 projects (+2 setup; build FIRST — §9 #16)
+npm run verify                      # typecheck → lint → 160 unit → build (+ assemble)
+npm run test:e2e                    # 99 cases × 2 projects (+2 setup; build FIRST — §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present, nonce'd (no unsafe-inline/eval in prod)
 
 # Parity pins
@@ -986,6 +1008,7 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Product JSON-LD (F-B) | `src/lib/structured-data.ts` (`productJsonLd` pure + `serializeJsonLd` — the F-D HTML-safe embedding) + the PDP page's data block (non-executing — CSP-exempt, census-invisible; the codebase's ONLY `dangerouslySetInnerHTML`) |
 | Action-seam security gate (session-21, H-59) | `tests/e2e/action-seam-security.spec.ts` — drives the PDP's server actions by direct POST (`Next-Action: <id>` + a JSON-array body; ids read from the standalone's per-route `server-reference-manifest.json` — the build-shape canary); the WRITE-FREE probe ladder (P1 classify → P2 split → P3 the H-59 payload) proves a foreign size is rejected over the wire with zero Set-Cookie and zero rows; the IDOR census proves a SQL-fixture guest bag line survives unauthenticated cart-line probes; the fail-closed census sweeps every candidate × write-free payload (always 200 + ok:false, never 5xx, never Set-Cookie) |
 | SEO metadata seam (session-22, F-H/F-H2) | `src/lib/sitemap.ts` (`siteOrigin` default-origin fallback + normalization; `buildSitemapEntries` — statics first, ACTIVE products only; `buildRobots` — the exact allow/disallow set; unit-pinned) + `src/app/sitemap.ts` / `src/app/robots.ts` (`force-dynamic` — the build stays DB-free) + `tests/e2e/seo.spec.ts` (asserts the SERVED BODY on the documented default origin — the lesson of F-H2: the scaffold's foreign `public/` statics had answered for 21 sessions) |
+| Brand metadata assets (session-24, F-K/F-K2/F-L/F-M) | `src/app/icon.svg` + `src/app/favicon.ico` (16/32/48) + `src/app/apple-icon.png` — the swan mark in the measured colors (`#404040` circle / `#F4ECD6` swan), rendered by `scripts/brand-assets.cjs` (chromium) + `scripts/png-to-ico.py` (explicit ICO container — Pillow's ICO save resamples from one base; the exact per-size renders ship verbatim) · `src/app/opengraph-image.png` (1200×630 card — auto-injects og:image/twitter:image on every route) · PDP og:image = the product's first photo (`parseProductImages` in `src/lib/products.ts` — malformed JSON degrades to the root card, never throws) · `src/lib/manifest.ts` (`buildManifest`, unit-pinned) + `src/app/manifest.ts` (STATIC route — origin-independent, DB-free) · fonts immutable caching (`next.config.ts` `/fonts/:file*`) · the gate: `tests/e2e/brand-metadata.spec.ts` (served artifacts + head tags + manifest body + cache header) |
 | Sale countdown seam | `src/lib/countdown.ts` + `src/components/store/sale-countdown.tsx` |
 | Catalog source of truth | `src/lib/data/catalog.ts` (incl. HERO_SLIDES.align + BRAND_MARQUEE + COLOR_HEX) |
 | Seed | `prisma/seed.ts` (`npm run db:setup`) |
