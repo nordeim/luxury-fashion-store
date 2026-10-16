@@ -34,6 +34,18 @@ export interface SweepResult {
   wishlists: number;
 }
 
+// F-J (session-23): the boot sweep fires the moment the server process starts —
+// in the E2E harness (webServer boots BEFORE global-setup pushes the schema)
+// and on any production deploy whose first boot precedes its migrations — so
+// the first pass can legitimately hit P2021 ("table does not exist"). The
+// classifier lets instrumentation.ts downgrade that ONE shape to a soft line
+// (the hourly interval already provides the retry) while every other failure
+// stays loud.
+export function isSchemaNotReady(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  return (error as { code?: unknown }).code === "P2021";
+}
+
 export async function runSweep(now: Date = new Date()): Promise<SweepResult> {
   const { db } = await import("@/lib/db");
   const plan = buildSweepPlan(now);

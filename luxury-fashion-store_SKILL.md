@@ -1,10 +1,10 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.15.0
-last_updated: 2026-10-16
+version: 1.16.0
+last_updated: 2026-10-17
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
-project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 151/151 unit (18 files) ✓ build ✓ E2E 182 passed + 2 skipped (91 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, the N-1/F-B CSP+JSON-LD gate, the session-21 action-seam security gate, and the session-22 SEO metadata gate — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
+project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 154/154 unit (18 files) ✓ build ✓ E2E 186 passed + 2 skipped (93 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, the N-1/F-B CSP+JSON-LD gate, the session-21 action-seam security gate, the session-22 SEO metadata gate, and the session-23 failure-surfaces gate — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
 reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only prototype (inert commerce buttons). This repo is its functional superset with resting-state visual parity."
 ---
 
@@ -93,8 +93,8 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | Styling | Tailwind CSS (CSS-first `@theme`) | 4.3.3 | v4 traps — see §9 #1–#2 |
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
-| Unit tests | Vitest (node env) | 3.2.7 | 151 tests (18 files: `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` — H-71 added the sweep-tool contract suite; N-1/F-B added `csp` + `structured-data`; F-D added the `serializeJsonLd` contract; F-H added the sitemap/robots SEO contract) |
-| E2E | Playwright (standalone server) | 1.64.0 | 91 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — the security-csp gate — N-1/F-B — the action-seam security gate — session-21, H-59 closed over the wire — and the SEO metadata gate — session-22, F-H) |
+| Unit tests | Vitest (node env) | 3.2.7 | 154 tests (18 files: `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` — H-71 added the sweep-tool contract suite; N-1/F-B added `csp` + `structured-data`; F-D added the `serializeJsonLd` contract; F-H added the sitemap/robots SEO contract; F-J added the `isSchemaNotReady` boot-race classifier) |
+| E2E | Playwright (standalone server) | 1.64.0 | 93 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — the security-csp gate — N-1/F-B — the action-seam security gate — session-21, H-59 closed over the wire — the SEO metadata gate — session-22, F-H — and the failure-surfaces gate — session-23, F-I2 + the RSC fallback contract) |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -185,7 +185,9 @@ for SALE, stars, and focus rings — never as a fill.
 src/app/
   layout.tsx                root (fonts, globals)
   globals.css               @theme inline tokens + @font-face + v4 pins + marquee keyframes
-  not-found.tsx
+  not-found.tsx               measured 404 card (chrome-less slate)
+  error.tsx | global-error.tsx  ← F-I boundaries: segment + ROOT (global-error
+                              renders its own <html>/<body> + imports globals.css)
   (auth)/login | register   measured slate-card auth surfaces (no chrome)
   (storefront)/             chrome composition point (header/footer/nav/drawers)
     layout.tsx                ← header, mobile nav, cart drawer, search, footer, StoreProvider
@@ -229,7 +231,9 @@ dropdown-menu, select, …) — Radix underneath, tokens from §4.
 `focus-trap.ts` (`installFocusTrap` — the dialog focus contract for the
 hand-rolled drawer/modals, H-26; document-level keydown since H-41),
 `sweeper.ts` (`buildSweepPlan` pure + `runSweep` executor — expired sessions /
-idle guest carts, K-1, wired in `src/instrumentation.ts` at boot + hourly),
+idle guest carts, K-1, wired in `src/instrumentation.ts` at boot + hourly;
+since F-J the boot catch classifies P2021 via `isSchemaNotReady` and downgrades
+the pre-schema race to one soft line, other failures stay loud),
 `adjust-plan.ts` (`planAdjustment`/`planCorrection` — the pure cart stepper
 decision seam, H-39/H-40; zero-delta skip since H-54), `countdown.ts`
 (`formatCountdownParts` + `SALE_COUNTDOWN_MS` — the P-9 sale countdown seam),
@@ -594,7 +598,27 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
     never booted. Fix: kill by LISTENING pid (`ss -tlnp | rg :3100` → kill
     the pid whose cmdline is just `next-server (v…)`), or `pkill -f
     next-server`; and never trust "the server is dead" until the port is
-    free.
+    free. Session-23 recurrence: a MANUAL spike server left holding :3100
+    was adopted the same way — the trap is not limited to killed parents;
+    ANY foreign listener is adopted when `reuseExistingServer` is on.
+
+37. **[MEDIUM] `git checkout <file>` reverts EVERYTHING uncommitted in that
+    file — including this session's work.** Session-23's mutation demo used
+    `git checkout src/lib/sweeper.ts` to undo a one-line sed mutation and
+    silently reverted the session's OWN uncommitted export with it; the next
+    build failed loudly (instrumentation imports the vanished export — the
+    gate chain caught it) and the unit file dropped back to its RED state.
+    Fix: never restore session-touched files with `git checkout` — apply the
+    INVERSE edit (sed/patch) so only the mutation dies; verify with `rg` for
+    the session's own markers ("F-J" etc.) before building.
+
+38. **[LOW] `getByText` matches DOM text — CSS `text-transform` is
+    invisible to it.** Session-23's PDP pin asserted the uppercase label
+    ("SIZE") exactly as the spike's `innerText` dump had shown it; the
+    locator found nothing because the DOM text is `Size` (the uppercase is
+    the stylesheet's). Fix: assert with a case-insensitive regex
+    (`getByText(/^size$/i)`) whenever the visible casing comes from CSS —
+    the same measured-vs-DOM distinction as trap #22 (oklab serialization).
 
 ## §10 Debugging Guide (symptom → cause → fix)
 
@@ -608,7 +632,9 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
 | E2E webServer: Prisma can't open DB | Relative URL re-anchored inside standalone | Absolute `file:` path in webServer env (pass-through in `db-path.ts`) |
 | A spec's `node -e` child dies with `SyntaxError: Unexpected token '('` on a line that reads `p.()` | `execSync` shell-expanded `$disconnect` to empty (§9 #34) | `spawnSync(cmd, [args-array])` — no shell, no expansion |
 | A fresh E2E gate asserts 200s but the BODY is another app's (wrong origin, routes that don't exist) while the rest of the suite passes | `public/` statics shadow route handlers (§9 #35) — scaffold-era `robots.txt`/`sitemap.xml` answer first | Delete the stale statics; assert bodies (origin + shape + counts), never just status codes |
-| E2E setups fail against a server you never booted; :3100 answers with a broken DB | A killed wrapper's `next-server` child still holds the port (§9 #36); `reuseExistingServer` adopted it | `ss -tlnp | rg :3100` → kill the LISTENING pid (its cmdline is `next-server (v…)`, not the script path) |
+| E2E setups fail against a server you never booted; :3100 answers with a broken DB | A killed wrapper's `next-server` child — or ANY stale listener, e.g. a manual spike server — still holds the port (§9 #36); `reuseExistingServer` adopted it | `ss -tlnp | rg :3100` → kill the LISTENING pid (its cmdline is `next-server (v…)` or the script path) |
+| A one-line mutation demo "restored" by `git checkout` drops the file to RED and the next build fails on a missing export | `git checkout` reverted the session's OWN uncommitted work in that file (§9 #37) | Apply the inverse edit instead; `rg` for the session's marker comments before rebuilding |
+| A locator on an uppercase label (`SIZE`) finds nothing though the spike's innerText showed it | CSS `text-transform` — `getByText` matches DOM text (`Size`), not rendered casing (§9 #38) | Case-insensitive regex locator (`/^size$/i`) |
 | Sections/borders invisible on parity surfaces | Bare HSL triplets in `@theme` | Convert to full `hsl()` literals (§4) |
 | Mobile menu rows collapse/overlap | `space-y-*` under v4 | `flex flex-col gap-5` (already pinned by spec — don't regress) |
 | Cart badge stale after an action | Client didn't re-sync from action DTO | Return the DTO; merge in `StoreProvider` (§6 pattern 1) |
@@ -632,8 +658,8 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
 ## §11 Pre-Ship Checklist
 
 ```bash
-npm run verify                      # typecheck → lint → 151 unit → build (+ assemble)
-npm run test:e2e                    # 91 cases × 2 projects (+2 setup; build FIRST — §9 #16)
+npm run verify                      # typecheck → lint → 154 unit → build (+ assemble)
+npm run test:e2e                    # 93 cases × 2 projects (+2 setup; build FIRST — §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present, nonce'd (no unsafe-inline/eval in prod)
 
 # Parity pins
@@ -950,7 +976,8 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | DB resolver (do not simplify) | `src/lib/db-path.ts` |
 | searchParams coercion | `src/lib/search-params.ts` (firstParam — every consumer) |
 | Dialog focus contract | `src/lib/focus-trap.ts` (installFocusTrap — every hand-rolled dialog) |
-| Transient sweeper | `src/lib/sweeper.ts` (+ `src/instrumentation.ts` wiring) |
+| Transient sweeper | `src/lib/sweeper.ts` (+ `src/instrumentation.ts` wiring; F-J: `isSchemaNotReady` downgrades the boot P2021 race) |
+| Failure surfaces (session-23, F-I) | `src/app/error.tsx` (segment boundary, slate card, reset + home) + `src/app/global-error.tsx` (ROOT boundary — own `<html>/<body>`, imports globals.css) + `tests/e2e/error-surfaces.spec.ts` (the 404 card pinned + the RSC-fallback hard-navigation contract; the boundary render itself is not wire-driveable without a fault-injection backdoor — rejected, see docs/remediation-plan-session23.md §4) |
 | Cart stepper planner (pure) | `src/lib/adjust-plan.ts` (planAdjustment / planCorrection) |
 | Countdown store (re-arm seam) | `src/lib/countdown-store.ts` + `src/lib/countdown-store.test.ts` |
 | Sweep tool primitives (H-71) | `scripts/sweep-lib.cjs` + `tests/unit/sweep-lib.test.ts` (waitHealth/assertPortFree contract pinned) |
