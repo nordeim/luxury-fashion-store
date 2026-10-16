@@ -1,10 +1,10 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.14.0
+version: 1.15.0
 last_updated: 2026-10-16
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
-project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 142/142 unit (17 files) ✓ build ✓ E2E 178 passed + 2 skipped (89 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, the N-1/F-B CSP+JSON-LD gate, and the session-21 action-seam security gate — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
+project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 151/151 unit (18 files) ✓ build ✓ E2E 182 passed + 2 skipped (91 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, the N-1/F-B CSP+JSON-LD gate, the session-21 action-seam security gate, and the session-22 SEO metadata gate — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
 reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only prototype (inert commerce buttons). This repo is its functional superset with resting-state visual parity."
 ---
 
@@ -93,8 +93,8 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | Styling | Tailwind CSS (CSS-first `@theme`) | 4.3.3 | v4 traps — see §9 #1–#2 |
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
-| Unit tests | Vitest (node env) | 3.2.7 | 142 tests (17 files: `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` — H-71 added the sweep-tool contract suite; N-1/F-B added `csp` + `structured-data`; F-D added the `serializeJsonLd` contract) |
-| E2E | Playwright (standalone server) | 1.64.0 | 89 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — the security-csp gate — N-1/F-B — and the action-seam security gate — session-21, H-59 closed over the wire) |
+| Unit tests | Vitest (node env) | 3.2.7 | 151 tests (18 files: `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` — H-71 added the sweep-tool contract suite; N-1/F-B added `csp` + `structured-data`; F-D added the `serializeJsonLd` contract; F-H added the sitemap/robots SEO contract) |
+| E2E | Playwright (standalone server) | 1.64.0 | 91 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — the security-csp gate — N-1/F-B — the action-seam security gate — session-21, H-59 closed over the wire — and the SEO metadata gate — session-22, F-H) |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -573,6 +573,29 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
     Same family as trap #13 (the loader quirks): child processes are a
     boundary; pass ARGV, not shell text.
 
+35. **[HIGH] `public/` statics SHADOW app routes — metadata routes
+    included.** Session-22's new SEO gate (F-H) failed its first run:
+    `/robots.txt` answered with a FOREIGN body (`User-agent` lowercase, an
+    `/order-success` route this app does not have, `Sitemap:
+    http://localhost:4173/...`) while the setup logins passed against the
+    real server. Cause: the scaffold's `public/robots.txt` +
+    `public/sitemap.xml` (git-tracked since session 1, an ecommerce-store
+    lineage artifact) answer BEFORE route handlers — Next serves `public/`
+    first — so the wire metadata had been WRONG (not missing) for 21
+    sessions while four documents advertised the real contract. Fix: `git
+    rm` the stale statics (F-H2); and any new metadata route must be
+    asserted on its BODY (origin + shape + counts), never its status code.
+
+36. **[MEDIUM] killing a server's PARENT leaves its `next-server` child
+    holding the port.** `pkill -f 'standalone/server.js'` killed the node
+    wrapper but the `next-server (v…)` child survived, kept :3100 bound with
+    a broken DB env, and playwright's `reuseExistingServer` adopted it —
+    the next run's setups failed confusingly while the real standalone was
+    never booted. Fix: kill by LISTENING pid (`ss -tlnp | rg :3100` → kill
+    the pid whose cmdline is just `next-server (v…)`), or `pkill -f
+    next-server`; and never trust "the server is dead" until the port is
+    free.
+
 ## §10 Debugging Guide (symptom → cause → fix)
 
 | Symptom | Root cause | Fix |
@@ -584,6 +607,8 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
 | E2E: auth passes in one spec, later specs see "Sign in" header | Logout spec destroyed the shared server-side session | Per-project `storageState` files; specs needing logged-out surfaces opt out explicitly |
 | E2E webServer: Prisma can't open DB | Relative URL re-anchored inside standalone | Absolute `file:` path in webServer env (pass-through in `db-path.ts`) |
 | A spec's `node -e` child dies with `SyntaxError: Unexpected token '('` on a line that reads `p.()` | `execSync` shell-expanded `$disconnect` to empty (§9 #34) | `spawnSync(cmd, [args-array])` — no shell, no expansion |
+| A fresh E2E gate asserts 200s but the BODY is another app's (wrong origin, routes that don't exist) while the rest of the suite passes | `public/` statics shadow route handlers (§9 #35) — scaffold-era `robots.txt`/`sitemap.xml` answer first | Delete the stale statics; assert bodies (origin + shape + counts), never just status codes |
+| E2E setups fail against a server you never booted; :3100 answers with a broken DB | A killed wrapper's `next-server` child still holds the port (§9 #36); `reuseExistingServer` adopted it | `ss -tlnp | rg :3100` → kill the LISTENING pid (its cmdline is `next-server (v…)`, not the script path) |
 | Sections/borders invisible on parity surfaces | Bare HSL triplets in `@theme` | Convert to full `hsl()` literals (§4) |
 | Mobile menu rows collapse/overlap | `space-y-*` under v4 | `flex flex-col gap-5` (already pinned by spec — don't regress) |
 | Cart badge stale after an action | Client didn't re-sync from action DTO | Return the DTO; merge in `StoreProvider` (§6 pattern 1) |
@@ -607,8 +632,8 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
 ## §11 Pre-Ship Checklist
 
 ```bash
-npm run verify                      # typecheck → lint → 142 unit → build (+ assemble)
-npm run test:e2e                    # 89 cases × 2 projects (+2 setup; build FIRST — §9 #16)
+npm run verify                      # typecheck → lint → 151 unit → build (+ assemble)
+npm run test:e2e                    # 91 cases × 2 projects (+2 setup; build FIRST — §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present, nonce'd (no unsafe-inline/eval in prod)
 
 # Parity pins
@@ -933,6 +958,7 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Security CSP seam (N-1) | `src/proxy.ts` (per-request nonce, request+response headers) + `src/lib/csp.ts` (pure directives, unit-pinned) + `tests/e2e/security-csp.spec.ts` (header shape, nonce-in-bytes, hydration, route coverage, JSON-LD) |
 | Product JSON-LD (F-B) | `src/lib/structured-data.ts` (`productJsonLd` pure + `serializeJsonLd` — the F-D HTML-safe embedding) + the PDP page's data block (non-executing — CSP-exempt, census-invisible; the codebase's ONLY `dangerouslySetInnerHTML`) |
 | Action-seam security gate (session-21, H-59) | `tests/e2e/action-seam-security.spec.ts` — drives the PDP's server actions by direct POST (`Next-Action: <id>` + a JSON-array body; ids read from the standalone's per-route `server-reference-manifest.json` — the build-shape canary); the WRITE-FREE probe ladder (P1 classify → P2 split → P3 the H-59 payload) proves a foreign size is rejected over the wire with zero Set-Cookie and zero rows; the IDOR census proves a SQL-fixture guest bag line survives unauthenticated cart-line probes; the fail-closed census sweeps every candidate × write-free payload (always 200 + ok:false, never 5xx, never Set-Cookie) |
+| SEO metadata seam (session-22, F-H/F-H2) | `src/lib/sitemap.ts` (`siteOrigin` default-origin fallback + normalization; `buildSitemapEntries` — statics first, ACTIVE products only; `buildRobots` — the exact allow/disallow set; unit-pinned) + `src/app/sitemap.ts` / `src/app/robots.ts` (`force-dynamic` — the build stays DB-free) + `tests/e2e/seo.spec.ts` (asserts the SERVED BODY on the documented default origin — the lesson of F-H2: the scaffold's foreign `public/` statics had answered for 21 sessions) |
 | Sale countdown seam | `src/lib/countdown.ts` + `src/components/store/sale-countdown.tsx` |
 | Catalog source of truth | `src/lib/data/catalog.ts` (incl. HERO_SLIDES.align + BRAND_MARQUEE + COLOR_HEX) |
 | Seed | `prisma/seed.ts` (`npm run db:setup`) |
