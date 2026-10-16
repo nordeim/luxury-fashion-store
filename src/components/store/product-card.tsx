@@ -181,6 +181,11 @@ export function ProductCard({ product, onQuickView }: ProductCardProps) {
               <span
                 key={`${color}-${i}`}
                 title={color}
+                // K-1 (session-16): role="img" makes aria-label PERMITTED on
+                // this span (axe aria-prohibited-attr: aria-label is banned on
+                // the generic role) and gives SRs the color name; zero visual
+                // change (role is semantic-only). title stays for pointer hover.
+                role="img"
                 aria-label={`Color ${color}`}
                 className="w-4 h-4 rounded-full border border-border hover:scale-125 transition-transform"
                 style={{ backgroundColor: COLOR_HEX[color] ?? "transparent" }}

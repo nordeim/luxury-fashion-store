@@ -30,7 +30,7 @@ A production-grade luxury fashion e-commerce storefront and admin console — a 
 1. **Reproduce/read first** — for bugs, reproduce in the browser or a test before touching code. For features, read the nearest parity surface and the action seam you'll extend.
 2. **Plan the seam** — decide which layer changes: page (RSC) → component → action (mutation) → validation → schema. Mutations ALWAYS go through `src/lib/actions/`.
 3. **Implement minimal + typed** — strict TS; no `any`; DTOs flow server→client as props.
-4. **Gate locally** — `npm run verify` (typecheck → lint → 122 unit tests → build), then `npm run test:e2e` (66 E2E cases × 2 device projects + 2 setup). All must pass before commit.
+4. **Gate locally** — `npm run verify` (typecheck → lint → 122 unit tests → build), then `npm run test:e2e` (71 E2E cases × 2 device projects + 2 setup — includes the automated axe a11y gate). All must pass before commit.
 5. **Verify in the browser** — dev server + `agent-browser` for visual/behavioral checks; screenshots for parity surfaces live in `docs/screenshots/`.
 6. **Document drift** — if you changed a pinned contract (env, db path, parity pins, test strategy), update `AGENTS.md` + the PAD in the same commit.
 
@@ -62,6 +62,7 @@ A production-grade luxury fashion e-commerce storefront and admin console — a 
 ### Testing strategy
 - **Vitest** (`src/lib/*.test.ts` + `tests/unit/*.test.ts`, node env): pure seams only — money, db-path resolution, validation schemas (incl. `profileSchema`, `wishlistMutationSchema`, the `sizeAllowed` bag-size allowlist), rate limiter, search-params coercion, delivery windows, HMAC tokens, shared image/P2002/P2025 helpers, sweeper cutoffs, cart-adjust planner (`adjust-plan`), countdown formatter + countdown store (re-arm/cache), plus the sweep-tool primitives contract (`tests/unit/sweep-lib.test.ts` — H-71: waitHealth's F3/G-2 deadline contract is permanently pinned).
 - **Playwright** (`tests/e2e/*.spec.ts`): boots the production standalone on :3100 against `db/e2e.db` via `global-setup.ts`; `npm run build` must run first. Web server env uses an **absolute** `DATABASE_URL` (file tracing copies `prisma/schema.prisma` into the standalone bundle, which would re-anchor a relative URL to a nonexistent path).
+- **Accessibility gate (K-1):** `accessibility-axe.spec.ts` runs axe-core on the public logged-out surfaces (home/shop/PDP/cart/login) at both projects, asserting ZERO WCAG 2.0/2.1 A+AA violations; `color-contrast` is excluded by the parity law (the reference's own measured palette fails the same rule). Logged-out = zero rate-budget consumption.
 - Auth: `setup-chromium` / `setup-mobile` projects each log in once → `tests/e2e/.auth/{chromium,mobile}.json`. Per-test logins would trip the 10/15min limiter.
 - Shared seeded DB across specs → assert deltas or canonical floors, not absolute counts; the logout spec runs its OWN throwaway login (H-24) so the per-project canonical sessions survive the whole run, and specs that create shared-state rows (cart merge, injected orders) clean up after themselves. global-setup wipes ALL transient tables (carts/wishlists/sessions/orders) and re-seeds, so every run starts canonical (H-22/H-25). **The admin login bucket is exactly consumed (10 per IP+email across both projects — SKILL §9 #23): tests needing an admin-side state change use the `prisma db execute` SQL fixture pattern (H-2/H-39), never an extra login.**
 - `scripts/assemble-standalone.mjs` runs as part of `npm run build` — without it the standalone serves SSR HTML with 404 chunks (zero hydration). Never remove it.
@@ -80,7 +81,7 @@ See the command table in `AGENTS.md`. The pre-commit gate is exactly:
 
 ```bash
 npm run verify        # typecheck → lint → unit → build
-npm run test:e2e      # 66 E2E cases × 2 device projects + 2 setup
+npm run test:e2e      # 71 E2E cases × 2 device projects + 2 setup
 ```
 
 ## Escalation Rules

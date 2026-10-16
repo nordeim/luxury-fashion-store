@@ -29,8 +29,11 @@ test.describe("home", () => {
     await expect(page.getByTestId("hero-carousel")).toBeVisible();
     // Announcement bar pins the shipping policy (reference copy).
     await expect(page.getByText(/COMPLIMENTARY SHIPPING ON ORDERS OVER \$500/i)).toBeVisible();
-    // Centered logotype.
-    await expect(page.getByLabel("AURELIA home")).toBeVisible();
+    // Centered logotype. (K-1, session-16: the link no longer carries an
+    // aria-label — its accessible name is its visible content, so the pin
+    // targets the role by the visible logotype text, scoped to the header
+    // because the footer carries an "About Velour" link.)
+    await expect(page.locator("header").getByRole("link", { name: "VELOUR" })).toBeVisible();
   });
 
   test("hero slide 1 anchors LEFT with left-aligned copy (P-1)", async ({ page }) => {

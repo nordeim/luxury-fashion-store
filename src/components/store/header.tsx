@@ -60,7 +60,19 @@ export function Header() {
           </div>
 
           {/* Center: logo */}
-          <Link href="/" aria-label="AURELIA home" className="absolute left-1/2 -translate-x-1/2 text-center">
+          {/* K-1 (session-16): NO aria-label here — deliberately. WCAG 2.5.3
+              Label-in-Name (axe label-content-name-mismatch) requires the
+              accessible name to contain the visible text, and axe's visible-
+              text walk concatenates text nodes RAW: "velourparis · milan ·
+              new york" (the JSX whitespace between the h1 logotype and the
+              lg-only tagline belongs to neither text node). ANY hand-written
+              aria-label with separators can never satisfy the token match
+              (["velourparis",…] is not a subsequence of ["velour","paris",…]).
+              With no label, the accessible name is COMPUTED from the content
+              by the same walk — the rule holds by construction, and screen
+              readers announce the logotype exactly as it reads. Zero visual
+              change. */}
+          <Link href="/" className="absolute left-1/2 -translate-x-1/2 text-center">
             <h1 className="font-cormorant text-2xl lg:text-3xl font-light tracking-[0.3em] text-foreground leading-none">
               VELOUR
             </h1>

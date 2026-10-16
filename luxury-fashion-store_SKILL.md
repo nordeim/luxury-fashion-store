@@ -1,10 +1,10 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.8.0
+version: 1.9.0
 last_updated: 2026-10-16
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
-project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 122/122 unit (15 files) ✓ build ✓ E2E 132 passed + 2 skipped (66 unique cases × chromium+mobile, two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
+project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 122/122 unit (15 files) ✓ build ✓ E2E 142 passed + 2 skipped (71 unique cases × chromium+mobile — incl. the K-1 axe a11y gate — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
 reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only prototype (inert commerce buttons). This repo is its functional superset with resting-state visual parity."
 ---
 
@@ -94,7 +94,7 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
 | Unit tests | Vitest (node env) | 3.2.7 | 122 tests (15 files: `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` — H-71 added the sweep-tool contract suite) |
-| E2E | Playwright (standalone server) | 1.64.0 | 66 unique cases × 2 device projects (+2 setup) |
+| E2E | Playwright (standalone server) | 1.64.0 | 71 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1) |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -292,6 +292,16 @@ need for a setState-in-effect, the codebase answer is pattern 1 or 2 above.
   `globals.css` pins every animation to 0.01ms ×1 and every transition to
   0.01ms for opting-out users; normal-path rendering untouched. Pinned by the
   same spec (reduced context: marquee 1e-05s ×1; normal: 30s).
+- **Automated axe gate (K-1, session-16):** `tests/e2e/accessibility-axe.spec.ts`
+  runs axe-core (already in node_modules — the former unused devDependency is
+  now load-bearing) against home / shop / PDP / cart / login at BOTH device
+  projects, logged-out (zero rate-budget consumption), asserting ZERO WCAG
+  2.0/2.1 A+AA violations. `color-contrast` is the one excluded rule — the
+  warm-paper/gold/muted palette IS the reference's measured identity (§4/§19)
+  and the parity law forbids restyling it (the reference fails the same rule
+  on the same nodes). Fixes it drove: `role="img"` on the product-card color
+  swatches (aria-label was prohibited on generic spans) and NO aria-label on
+  the header logotype (trap #30).
 
 Former roadmap gaps CLOSED in session-11: skip-to-content +
 `prefers-reduced-motion` shipped (see `docs/remediation-plan-session11.md`).
@@ -477,6 +487,24 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
     its own timeout — every retry loop needs a per-request deadline
     (`req.setTimeout`), not just a cross-retry budget. Same failure family
     as trap #27 (measure the wrong thing confidently), one door narrower.
+30. **[MEDIUM] axe's visible-text walk concatenates text nodes RAW — an
+    aria-label can never satisfy Label-in-Name when the visible text spans
+    block-level children.** Session 16's K-1 fix drove this first-hand: the
+    header logotype link wraps an `h1` ("VELOUR") and an `lg:block` tagline
+    ("PARIS · MILAN · NEW YORK"); axe's `visibleVirtual` returns
+    "velourparis · milan · new york" — the JSX whitespace between the two
+    elements belongs to NEITHER text node, so the first token is
+    `velourparis` (measured via axe.setup + text.visibleVirtual). The rule
+    matches token CONTIGUOUS SUBSEQUENCES (`isLabelContainedInName` →
+    `isContiguousSubsequence`), so EVERY hand-written name with a separator
+    after "VELOUR" fails ("VELOUR — …", "VELOUR PARIS…" — the latter fails
+    because the WALK produced `velourparis`, not because of the dash). Fix:
+    DROP the aria-label — the accessible name is then computed from the
+    content by the same walk and the rule holds by construction (screen
+    readers announce the logotype exactly as it reads). Corollary: locate
+    such a label-less logotype with a header-scoped role query, not
+    `getByLabel` — and remember the footer's "About Velour" link makes an
+    unscoped `getByRole("link", { name: "VELOUR" })` a strict-mode violation.
 
 ## §10 Debugging Guide (symptom → cause → fix)
 
@@ -512,7 +540,7 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
 
 ```bash
 npm run verify                      # typecheck → lint → 122 unit → build (+ assemble)
-npm run test:e2e                    # 66 cases × 2 projects (+2 setup; build FIRST — §9 #16)
+npm run test:e2e                    # 71 cases × 2 projects (+2 setup; build FIRST — §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present (no unsafe-eval in prod)
 
 # Parity pins
@@ -833,6 +861,7 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Cart stepper planner (pure) | `src/lib/adjust-plan.ts` (planAdjustment / planCorrection) |
 | Countdown store (re-arm seam) | `src/lib/countdown-store.ts` + `src/lib/countdown-store.test.ts` |
 | Sweep tool primitives (H-71) | `scripts/sweep-lib.cjs` + `tests/unit/sweep-lib.test.ts` (waitHealth/assertPortFree contract pinned) |
+| Automated a11y gate (K-1) | `tests/e2e/accessibility-axe.spec.ts` (axe-core; zero WCAG 2.0/2.1 A+AA violations, color-contrast excluded by parity law) |
 | Sale countdown seam | `src/lib/countdown.ts` + `src/components/store/sale-countdown.tsx` |
 | Catalog source of truth | `src/lib/data/catalog.ts` (incl. HERO_SLIDES.align + BRAND_MARQUEE + COLOR_HEX) |
 | Seed | `prisma/seed.ts` (`npm run db:setup`) |
