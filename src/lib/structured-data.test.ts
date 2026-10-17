@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { productJsonLd, serializeJsonLd, storeRootJsonLd } from "./structured-data";
+import { breadcrumbJsonLd, productJsonLd, serializeJsonLd, storeRootJsonLd } from "./structured-data";
 import type { ProductCardData } from "./products";
 
 // F-B (session-19): the README has documented the PDP's JSON-LD since the
@@ -165,6 +165,64 @@ describe("storeRootJsonLd", () => {
     );
     expect(Object.keys(blocks[1]).sort()).toEqual(
       ["@context", "@type", "logo", "name", "url"].sort()
+    );
+  });
+});
+
+// F-S (session-26): the page-level breadcrumb graph. The reference's login
+// head carries a THIRD block — BreadcrumbList [Home → origin/, login →
+// origin/login] — measured first-hand (2026-10-17); the clone's auth pages
+// shipped zero identity graphs. The seam builds the measured shape: 1-based
+// positions, name+item per entry, `item` absolutized via the established
+// contract.
+describe("breadcrumbJsonLd", () => {
+  const ORIGIN = "https://aurelia.example";
+
+  it("emits a schema.org BreadcrumbList graph with 1-based positions", () => {
+    const ld = breadcrumbJsonLd(
+      [
+        { name: "Home", path: "/" },
+        { name: "login", path: "/login" },
+      ],
+      ORIGIN
+    );
+    expect(ld["@context"]).toBe("https://schema.org");
+    expect(ld["@type"]).toBe("BreadcrumbList");
+    expect(ld.itemListElement).toEqual([
+      { "@type": "ListItem", position: 1, name: "Home", item: `${ORIGIN}/` },
+      { "@type": "ListItem", position: 2, name: "login", item: `${ORIGIN}/login` },
+    ]);
+  });
+
+  it("mirrors the measured reference-faithful login shape exactly", () => {
+    // The measured block: Home keeps its trailing-slash item; the leaf name
+    // is lowercase (reference-faithful, measured 2026-10-17).
+    const ld = breadcrumbJsonLd(
+      [
+        { name: "Home", path: "/" },
+        { name: "login", path: "/login" },
+      ],
+      ORIGIN
+    );
+    expect(ld.itemListElement[0].item).toBe(`${ORIGIN}/`);
+    expect(ld.itemListElement[1].name).toBe("login");
+  });
+
+  it("passes absolute item URLs through untouched", () => {
+    const ld = breadcrumbJsonLd(
+      [{ name: "Offsite", path: "https://elsewhere.example/page" }],
+      ORIGIN
+    );
+    expect(ld.itemListElement[0].item).toBe("https://elsewhere.example/page");
+  });
+
+  it("carries exactly the measured field sets (no invented extras)", () => {
+    const ld = breadcrumbJsonLd([{ name: "Home", path: "/" }], ORIGIN);
+    expect(Object.keys(ld).sort()).toEqual(
+      ["@context", "@type", "itemListElement"].sort()
+    );
+    expect(Object.keys(ld.itemListElement[0]).sort()).toEqual(
+      ["@type", "position", "name", "item"].sort()
     );
   });
 });

@@ -118,3 +118,44 @@ export function storeRootJsonLd(origin: string): [WebsiteJsonLd, OrganizationJso
     },
   ];
 }
+
+// F-S (session-26): the page-level breadcrumb graph. The reference's login
+// head carries a THIRD builder-injected block — BreadcrumbList
+// [Home → origin/, login → origin/login] — measured first-hand (2026-10-17);
+// the clone's auth pages shipped zero identity graphs (the session-25 fix
+// scoped the site-level blocks to the storefront layout; the chrome-less
+// (auth) group was never audited). The entries are page-specific, so the
+// graph is built per page; positions are 1-based and `item` is absolutized
+// with the established contract (root-relative in, absolute out — the
+// measured Home entry keeps its trailing slash).
+
+export interface BreadcrumbEntry {
+  name: string;
+  /** Root-relative path ("/login") or absolute URL; absolutized against the origin. */
+  path: string;
+}
+
+export interface BreadcrumbJsonLd {
+  "@context": "https://schema.org";
+  "@type": "BreadcrumbList";
+  itemListElement: Array<{
+    "@type": "ListItem";
+    position: number;
+    name: string;
+    item: string;
+  }>;
+}
+
+/** Build the page-level BreadcrumbList graph (pure; 1-based positions). */
+export function breadcrumbJsonLd(entries: BreadcrumbEntry[], origin: string): BreadcrumbJsonLd {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: entries.map((entry, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: entry.name,
+      item: absolutize(entry.path, origin),
+    })),
+  };
+}

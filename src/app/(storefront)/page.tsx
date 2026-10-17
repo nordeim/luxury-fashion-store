@@ -1,6 +1,14 @@
+import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { toProductCardData } from "@/lib/products";
 import { StorefrontHome } from "@/components/store/storefront-home";
+
+// F-T (session-26): the reference ships a canonical on its home page
+// (measured `…/` with the trailing slash, 2026-10-17). Title/description
+// stay unset — the root default renders byte-identical ("AURELIA").
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 // Home — parity surface (12 sections in reference order). All product
 // selection happens server-side; the client island renders.

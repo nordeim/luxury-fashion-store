@@ -32,6 +32,22 @@
 // 7. F-P — the browser-chrome tint (theme-color) is the measured paper the
 //    manifest pins.
 // 8. F-Q — the RFC 9116 security-contact file serves with the real channel.
+//
+// Session-26 extension (F-R / F-S / F-T / F-V — the structural + auth-identity
+// + canonical + product-OG catch-up):
+//
+// 9. F-S — the auth pages carry the reference-measured identity graphs: the
+//    (auth) layout ships WebSite + Organization (the same site-level blocks
+//    the storefront layout renders — the reference's builder injects them on
+//    every page) and each page adds its own BreadcrumbList (login's is the
+//    measured block; register's is the parallel form). All three blocks carry
+//    the request nonce in the served bytes.
+// 10. F-T — canonical links ship on the four indexable statics (home keeps
+//     its trailing slash, the measured ref shape) + the PDP (pinned — it
+//     shipped unasserted).
+// 11. F-V — the PDP carries the product price for share crawlers via the
+//     typed Metadata.other contract (name-attributed; og:type stays website
+//     — Next's OpenGraphType lacks "product", a cast was rejected).
 import { expect, test } from "@playwright/test";
 
 const PDP_PATH = "/product/silk-draped-evening-gown"; // the L-2 seed-contract slug
@@ -216,5 +232,117 @@ test.describe("brand metadata assets (F-K / F-K2 / F-L / F-M / F-N / F-O / F-P /
       "Contact: https://github.com/nordeim/luxury-fashion-store/security/advisories/new"
     );
     expect(body).toMatch(/^Expires: \d{4}-\d{2}-\d{2}T/m);
+  });
+
+  // F-V (session-26): the product price on the share surface — moved to the
+  // session-26 describe below (it groups the logged-out opt-out the auth
+  // surfaces need).
+});
+
+// Session-26 extension (F-S / F-T / F-V): the auth pages REDIRECT a session
+// to /account (the page guard), so these cases run logged-out — the
+// established empty-storageState opt-out (the a11y/auth specs' pattern).
+test.describe("brand metadata assets — session-26 (F-S / F-T / F-V)", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  // F-S (session-26): the auth identity + breadcrumb graphs — the reference's
+  // login head carries THREE builder-injected blocks (measured 2026-10-17);
+  // the clone's (auth) group shipped zero until this round.
+  test("the auth pages carry the identity graphs + the page breadcrumb with the request nonce", async ({
+    request,
+  }) => {
+    for (const [path, leaf] of [
+      ["/login", "login"],
+      ["/register", "register"],
+    ] as const) {
+      const res = await request.get(path);
+      expect(res.status()).toBe(200);
+      const html = await res.text();
+      const scriptSrc =
+        (res.headers()["content-security-policy"] ?? "")
+          .split(";")
+          .map((d) => d.trim())
+          .find((d) => d.startsWith("script-src")) ?? "";
+      const nonce = scriptSrc
+        .split(" ")
+        .find((s) => s.startsWith("'nonce-"))
+        ?.slice(7, -1);
+      expect(nonce, `${path} header nonce extracted`).toBeTruthy();
+
+      const blocks = Array.from(
+        html.matchAll(/<script type="application\/ld\+json"[^>]*>(.*?)<\/script>/g)
+      ).map((m) => JSON.parse(m[1]) as Record<string, unknown>);
+      expect(blocks, `${path} serves three graphs`).toHaveLength(3);
+      // Served order matches the reference: site-level blocks (the layout)
+      // first, then the page-level breadcrumb.
+      expect(blocks[0]["@type"]).toBe("WebSite");
+      expect(blocks[1]["@type"]).toBe("Organization");
+      expect(blocks[2]["@type"]).toBe("BreadcrumbList");
+      expect(blocks[0]).toEqual({
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        name: "AURELIA",
+        url: "http://localhost:3000",
+      });
+      expect(blocks[2]).toEqual({
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Home", item: "http://localhost:3000/" },
+          { "@type": "ListItem", position: 2, name: leaf, item: `http://localhost:3000${path}` },
+        ],
+      });
+
+      const ldTags = Array.from(
+        html.matchAll(/<script type="application\/ld\+json"[^>]*>/g)
+      ).map((m) => m[0]);
+      expect(ldTags, `${path} block count`).toHaveLength(3);
+      for (const tag of ldTags) {
+        expect(tag, `${path} data block lacks the nonce: ${tag}`).toContain(
+          `nonce="${nonce}"`
+        );
+      }
+    }
+  });
+
+  // F-T (session-26): canonical links on the indexable surfaces — the
+  // reference ships them on home (trailing slash, measured) and login; the
+  // clone's four statics + the PDP now all pin one (the PDP's shipped
+  // unasserted since its metadata landed).
+  test("canonical links serve on the indexable surfaces", async ({ request }) => {
+    const cases: Array<[string, string]> = [
+      // Next's resolveAbsoluteUrlWithPathname collapses a root-path canonical
+      // to the bare origin (pathname "/" + no query -> result.origin) — the
+      // measured reference ships "…/" with the slash; RFC-3986-equivalent.
+      ["/", "http://localhost:3000"],
+      ["/shop", "http://localhost:3000/shop"],
+      ["/login", "http://localhost:3000/login"],
+      ["/register", "http://localhost:3000/register"],
+      [PDP_PATH, "http://localhost:3000" + PDP_PATH],
+    ];
+    for (const [path, href] of cases) {
+      const res = await request.get(path);
+      expect(res.status(), `GET ${path}`).toBe(200);
+      const html = await res.text();
+      const canonical = html.match(
+        /<link rel="canonical" href="([^"]+)"\/>/
+      )?.[1];
+      expect(canonical, `${path} canonical present`).toBe(href);
+    }
+  });
+
+  // F-V (session-26): the product price on the share surface — the typed
+  // Metadata.other contract (name-attributed; see the F-V residual notes in
+  // docs/remediation-plan-session26.md §4).
+  test("the PDP carries the product price for share crawlers", async ({
+    request,
+  }) => {
+    const res = await request.get(PDP_PATH);
+    expect(res.status()).toBe(200);
+    const html = await res.text();
+    // The seeded gown: 285000 integer cents -> "2850.00" (the same /100
+    // arithmetic the Product JSON-LD unit-pins).
+    expect(html).toContain('<meta name="product:price:amount" content="2850.00"/>');
+    expect(html).toContain('<meta name="product:price:currency" content="USD"/>');
   });
 });

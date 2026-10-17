@@ -90,8 +90,18 @@ export default async function StorefrontLayout({
       {/* A-1 (session-11): fragment target — tabIndex=-1 makes <main>
           focusable so Enter on the skip link moves FOCUS here, not just
           scroll (WCAG 2.4.1). focus:outline-none keeps the jump silent. */}
-      <main id="main-content" tabIndex={-1} className="min-h-[60vh] focus:outline-none">{children}</main>
-      <Newsletter />
+      {/* F-R (session-26): the newsletter band renders INSIDE <main>, after
+          the page content — the reference moved its band inside its main
+          (round-21a census: mainKids 10→11 on BOTH viewports, pageH
+          byte-unchanged, measured 2026-10-17); the layout is the matching
+          composition point and the visual order (content → newsletter →
+          footer) is unchanged. The newsletter band's own height already
+          matched (the pageH parity proves it) — the move is rest-invisible
+          by measurement, and the round-21b census is the verdict. */}
+      <main id="main-content" tabIndex={-1} className="min-h-[60vh] focus:outline-none">
+        {children}
+        <Newsletter />
+      </main>
       <Footer />
       </StoreProvider>
     </>

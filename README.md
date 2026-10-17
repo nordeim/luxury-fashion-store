@@ -1,6 +1,6 @@
 # AURELIA — Luxury Fashion E-Commerce (VELOUR)
 
-![Next.js](https://img.shields.io/badge/Next.js-16.4-000000) ![React](https://img.shields.io/badge/React-19.3-61dafb) ![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20strict-3178c6) ![Tailwind](https://img.shields.io/badge/TailwindCSS-4.3-38bdf8) ![Prisma](https://img.shields.io/badge/Prisma-6.19-2D3748) ![Tests](https://img.shields.io/badge/tests-169%20unit%20%2B%20206%20e2e-brightgreen)
+![Next.js](https://img.shields.io/badge/Next.js-16.4-000000) ![React](https://img.shields.io/badge/React-19.3-61dafb) ![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20strict-3178c6) ![Tailwind](https://img.shields.io/badge/TailwindCSS-4.3-38bdf8) ![Prisma](https://img.shields.io/badge/Prisma-6.19-2D3748) ![Tests](https://img.shields.io/badge/tests-173%20unit%20%2B%20212%20e2e-brightgreen)
 
 A production-grade luxury fashion storefront + admin console — a **functional superset** of the reference prototype `pastel-aurelia-fashion-edit.base44.app` with resting-state visual parity: full catalog, cart, guest+member checkout, wishlist, customer accounts, and a role-gated admin, where the reference shipped inert buttons and two pages.
 
@@ -27,6 +27,7 @@ The reference site is a polished **visual prototype**: working login, cart drawe
 | Admin | Role-gated dashboard, order management (status/tracking), product stock/activation |
 | Brand metadata | Swan favicon/apple icon (vector-authored in the measured palette), 1200×630 og share card, per-product og:image, PWA manifest (`/manifest.webmanifest`), immutable font caching |
 | Store-root identity & transport | WebSite + Organization JSON-LD (the reference-measured graphs, nonce-carrying data blocks), first-paint font preloads (crossorigin), `theme-color` browser-chrome tint, RFC 9116 `/.well-known/security.txt` |
+| Auth identity, canonicals & product OG | Auth pages carry the reference-measured WebSite + Organization + BreadcrumbList graphs (nonce-carrying); canonical links on the indexable surfaces; per-product `product:price:*` share metas |
 | API | `/api/health`, `/api/search` (typeahead), `/api/newsletter` — the only REST endpoints (reads only) |
 
 ## Architecture
@@ -40,7 +41,7 @@ The reference site is a polished **visual prototype**: working login, cart drawe
 | ORM / DB | Prisma + SQLite | 6.19.3 | 13 models, single-file DB at `db/custom.db` |
 | Auth | Custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 | Validation | Zod | 3.25.76 | Every seam (forms, actions, admin updates) |
-| Testing | Vitest 3.2.7 + Playwright 1.64.0 | — | 169 unit + 103 E2E cases × 2 device projects (incl. an automated axe a11y gate across logged-out, logged-in, AND admin surfaces, a CSP/JSON-LD security gate, an action-seam security gate — crafted server-action POSTs over the wire — an SEO metadata gate serving the documented sitemap/robots contract, a failure-surfaces gate pinning the 404 card and the RSC-fallback hard-navigation contract, and a brand-metadata gate pinning the swan mark, the og share card, the PWA manifest body, the immutable font cache, the store-root JSON-LD, the font preloads, the theme-color tint, and the security.txt contract) |
+| Testing | Vitest 3.2.7 + Playwright 1.64.0 | — | 173 unit + 106 E2E cases × 2 device projects (incl. an automated axe a11y gate across logged-out, logged-in, AND admin surfaces, a CSP/JSON-LD security gate, an action-seam security gate — crafted server-action POSTs over the wire — an SEO metadata gate serving the documented sitemap/robots contract, a failure-surfaces gate pinning the 404 card and the RSC-fallback hard-navigation contract, and a brand-metadata gate pinning the swan mark, the og share card, the PWA manifest body, the immutable font cache, the store-root JSON-LD, the font preloads, the theme-color tint, the security.txt contract, the auth-page identity + breadcrumb graphs, the canonical links, and the product-price metas) |
 
 ```text
 Browser ── RSC pages (force-dynamic)
@@ -75,8 +76,8 @@ Demo accounts (printed on `/login` in development only — hidden in production 
 ## Testing
 
 ```bash
-npm run verify        # typecheck → lint → vitest (169) → production build
-npm run test:e2e      # Playwright: boots the production standalone (build FIRST — 103 cases × 2 projects, +2 setup)
+npm run verify        # typecheck → lint → vitest (173) → production build
+npm run test:e2e      # Playwright: boots the production standalone (build FIRST — 106 cases × 2 projects, +2 setup)
 npx playwright test tests/e2e/mobile-navigation.spec.ts   # single spec
 npx vitest run src/lib/money.test.ts                      # single unit file
 ```
@@ -109,7 +110,7 @@ PORT=3000 NODE_ENV=production AUTH_SECRET=<secret> DATABASE_URL="file:<absolute>
 | Reference recon (computed-style spec) | ✅ | `recon` artifacts + measured pins |
 | Transformation to Next.js 16 | ✅ | Vite SPA lineage archived in `docs/legacy-homenest/` |
 | Functional superset (PLP/PDP/cart/checkout/account/admin) | ✅ | All commerce paths live |
-| Test suites (vitest + playwright) | ✅ | 169 unit · 103 E2E × 2 + 2 setup (incl. the axe a11y gate, 14 surfaces incl. logged-in + admin, the CSP/JSON-LD gate, the action-seam security gate, the SEO metadata gate, the failure-surfaces gate, and the brand-metadata gate), all green |
+| Test suites (vitest + playwright) | ✅ | 173 unit · 106 E2E × 2 + 2 setup (incl. the axe a11y gate, 14 surfaces incl. logged-in + admin, the CSP/JSON-LD gate, the action-seam security gate, the SEO metadata gate, the failure-surfaces gate, and the brand-metadata gate), all green |
 | Docs (AGENTS/CLAUDE/README/PAD + distilled SKILL.md) | ✅ | This release |
 
 ## License

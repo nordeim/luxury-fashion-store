@@ -7,6 +7,9 @@ import { ShopClient } from "@/components/store/shop-client";
 export const metadata: Metadata = {
   title: "Shop",
   description: "Discover the full AURELIA collection — women, men, accessories and shoes.",
+  // F-T (session-26): the indexable statics carry canonicals (the PDP has
+  // since its metadata shipped).
+  alternates: { canonical: "/shop" },
 };
 
 // PLP — functional superset (the reference /shop 404s). Filters deep-link

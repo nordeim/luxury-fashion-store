@@ -29,6 +29,19 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
     description: product.description,
     alternates: { canonical: `/product/${product.slug}` },
     openGraph: images.length > 0 ? { images: [{ url: images[0] }] } : undefined,
+    // F-V (session-26): the product price on the share surface — the
+    // cents→dollars arithmetic the Product JSON-LD unit-pins. Next 16.4's
+    // typed escape hatch for custom metas is the TOP-LEVEL `Metadata.other`
+    // (renders <meta name="product:price:amount"> — HTML-valid, machine-
+    // readable). Two documented residuals: og:type stays "website" (Next's
+    // OpenGraphType union lacks "product" — a type-dishonest cast was
+    // rejected) and the tags render with the `name` attribute (Next's
+    // `other` contract), not OG's conventional `property`. The schema.org
+    // Product JSON-LD above remains the authoritative price channel.
+    other: {
+      "product:price:amount": (product.price / 100).toFixed(2),
+      "product:price:currency": "USD",
+    },
   };
 }
 
