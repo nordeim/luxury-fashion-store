@@ -1,0 +1,39 @@
+Resuming with the **Session 33 task book** (trace `1a149ed0610e0831`). Per the standing precedent, my round = the session-33 continuation auditing `1c7fb3d` plus the newly-landed `bebf2e3` duplicate session-log commit.
+
+**Step 1: Workspace refresh + sandbox state check**
+Workspace intact; pull fast-forwarded `1704740..bebf2e3` — brought ONLY `docs/session_34.md` (74 lines: a parallel thread's narration of the SAME session-32 round, per the session-31 task book trace; docs-only, zero code — cross-checked against `1c7fb3d`'s actual diff and RETAINED; my round's own narration therefore ships as `session_35.md`). Sandbox reset incidents this round — **ZERO** (the reset set fully survived for the second time in the ledger): `.env` canonical relative contract, `.env.example` consistent, no `bun.lock`, `bin/ssh` shim + paramiko 5.0.0 present, Playwright cache both builds (v1200 + v1248 on @playwright/test 1.64.1), `db/custom.db` canonical 4/12/2/4 (Prisma count verified directly), `core.fileMode false`, `skills/` intact (283 entries), node_modules synced to the lockfile (next 16.4.2 / react 19.3.1 / playwright 1.64.1 / tailwind 4.3.3 / prisma client 6.19.3 — verified from the installed packages).
+
+**Step 2: Baseline gates**
+typecheck ✓ lint ✓ **173/173 unit (19 files)** ✓ build + assemble ✓ — the TWENTY-FIFTH consecutive session green at baseline.
+
+**Step 3: First-hand audit of `1c7fb3d` + `bebf2e3`**
+Session-32: 5/5 claims TRUE — the F-CC describe read in full AND re-run green on the fresh build (checkout gate **26 passed** = 12 unique × 2 + 2 setup). `bebf2e3`: docs-only (1 file, +74). Doc counts consistent (SKILL v1.25.0 / README 173+250 / CLAUDE 126 / PAD 17|126|250).
+
+**Step 4: Round-28a census**
+**ZERO DRIFT** (31st/32nd consecutive) — all fields byte-match the ledger (11079/11085 · 11257/11264, mainKids 11, footers 444/1189, drawer char-identical `w-80` + `flex flex-col gap-5`, gaps [20,20,20,20]; ref console = documented 2× 401 residue; clone clean). Eight stable rounds since the round-21 move.
+
+**Step 5: Fresh audit pass — the round's finding**
+The surface-census cross-reference (`rg "account/orders" tests/` → NOTHING) surfaced **F-DD**: the account order-detail surface (`/account/orders/[id]`) is a ZERO-coverage seam carrying TWO declared contracts — (a) the **owner IDOR gate** (`order.userId !== user.id → notFound()`; the canonical seed ships the probe target: ORD-2026-004 is a GUEST order with `userId: null`), and (b) the **F-16 admin-note privacy filter** (`events.filter(e => e.actor !== "admin")` — declared in FOUR source places: the OrderEvent model header, the admin action's comment, the page's filter comment, the seed's G-6/H-10 backfill comment). A dropped gate serves any order's items/total/last-4/full shipping address to any signed-in customer; a dropped filter leaks every internal admin note — both with every gate green. The admin mutation IS wire-exercised (admin.spec.ts) but its event minting's customer-side visibility is asserted nowhere. LOW gate-coverage, zero product defect. Competing leads dismissed first-hand: the admin order-update mutation (wire-exercised — its unpinned event half IS F-DD); the guest wishlist merge (zero-coverage but no prose-declared contract of its own — documented candidate); the login `?redirect=` landing (validator unit-pinned — the session-31 precedent).
+
+**Step 6: Plan-probe discipline (the throwaway-DB-copy harness reused)**
+`scripts/plan-probe-session33.cjs` — **17/17 checks passed** before the spec: the copy boot + health, james's real-UI login on the copy (1 free slot), /account lists the three customer orders and hides the guest order (the userId-filtered query), the detail renders 200 with the system events visible, the SQL-minted `actor:"admin"` note ABSENT from the body while system events stay visible, the insert verified, the guest order 404s with no existence leak, zero console errors — zero dev-DB writes.
+
+**Step 7: Remediation plan + TDD**
+Plan saved → validated. NEW `tests/e2e/account-orders.spec.ts` (the surface's FIRST owner): two cases riding james's per-project storageState — ZERO logins, zero limiter budget (the admin bucket stays exactly consumed): (1) the F-16 privacy case (runtime `dbRead` resolves ORD-2026-002's id — fresh cuids every run; the SQL fixture mints the exact `adminUpdateOrderAction` shape with a run-unique note; the note ABSENT from the served body while the seed's system events stay visible; try/finally self-clean, H-24); (2) the IDOR case (the canonical guest ORD-2026-004 → 404 + not-found card + no existence leak — zero SQL, the seed IS the fixture). First GREEN run failed case 1 on both projects — root cause `randomBytes` imported from `node:fs` (module-load crash, not a product failure) — fixed to `node:crypto` → GREEN **6 passed** (2 × 2 + 2 setup). Mutation demo surgical: the filter dropped (`order.events` unfiltered) → REBUILD → **exactly the 2 privacy case-runs failed** (the IDOR case + setups stayed green — the gap's exact shape) → restored via inverse edit (rg-verified) → rebuild → 6/6.
+
+**Step 8: Round-28b census + final gates**
+**ROUND-28B: ZERO DRIFT** (31st/32nd) — byte-identical to 28a; the test-only round proven rest-invisible; 9 screenshots refreshed. Final gates: typecheck ✓ lint ✓ 173/173 unit ✓ build ✓ **E2E 254 passed + 2 skipped** (128 unique × 2 − 2 desktop-only skips; the +2 setup projects pass outside the case-run summary — the established convention; 5.2m) — the TWENTY-FIFTH consecutive fully-green session, exactly the count ledger.
+
+**Step 9: Docs + commit + push**
+SKILL v1.26.0 (frontmatter 128+254+2, §2 E2E row + F-DD, §11 128, Appendix B NEW session-33 row); README (badge 173+254, the Orders row + the account-detail pin, the Testing architecture row, testing/status rows 128); CLAUDE.md (gate line 128 + the F-DD gate in the chain, NEW F-DD testing bullet, commands 128); PAD (test table 18|128|254, the coverage-map session-33 sentence, §7.3 128); AGENTS.md (the security line gains the F-DD gate). Stale-count sweep clean. The plan's §7 record honestly corrects its own pre-execution "256" arithmetic to the observed 254 convention. Committed → SSH wrapper v3 dry-run → real push → remote verified → key shredded. This session log ships as the follow-up "update session log" commit (`docs/session_35.md`).
+
+**Session 33 (session-32 continuation) complete** — the 25th consecutive fully-green session.
+
+**What happened this round:**
+- **Pulled `bebf2e3`** (the duplicate session_34.md log from a parallel thread — docs-only, retained); **ZERO sandbox incidents** (the reset set fully survived, including the DB row counts)
+- **Audited `1c7fb3d`: 5/5 TRUE** (the F-CC gate re-run green: 26 passed on the fresh build)
+- **Round-28 census: ZERO DRIFT** (31st/32nd sweeps) — the mobile drawer's Tailwind v4 `flex gap-5` pin holds char-identical
+- **Found + closed F-DD via TDD**: the account order-detail surface (`/account/orders/[id]`) — zero wire coverage until this round — now pins BOTH declared contracts (the F-16 admin-note privacy filter + the owner IDOR gate) with ZERO logins (the SQL fixture + the canonical guest order are the fixtures); the mutation demo surgical
+- **Final gates**: typecheck ✓ lint ✓ 173/173 unit ✓ build ✓ **E2E 254 passed + 2 skipped** (128×2) — SKILL v1.26.0, all docs aligned
+
+**Next steps:** pull fresh next round (check ALL reset-set items INCLUDING db row counts); residual candidates: the `/checkout/success` isOwner positive path (narrowed), the guest wishlist merge at login (zero-coverage, no prose-declared contract), the search-429 limiter-reset harness, the admin action's event-write path (the read side is now pinned); the plan-probe pattern (throwaway-DB-copy + real-UI login on the copy) is the reusable shape for any auth-gated read-surface probe.
