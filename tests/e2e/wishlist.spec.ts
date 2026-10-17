@@ -222,3 +222,172 @@ test.describe("guest wishlist merge (F-EE, session-34)", () => {
     }
   });
 });
+
+// Guest wishlist merge DEDUPE half (session-36, F-GG).
+//
+// The F-EE gate pins the merge's CREATE half — its fresh user's list is
+// empty at merge time, so only the create branch runs deterministically
+// (the F-EE header says so verbatim). The DEDUPE half — the per-item
+// upsert's `update: {}` branch (src/lib/cart.ts) — fires when the guest
+// cookie holds a piece the user's list ALREADY has, and no gate exercised
+// it (carried session-32 §8 → 34 §8 #2 → 35 §8 #3, the session-35 plan's
+// "strongest remaining candidate"). The regression class the pin guards:
+// the upsert rewritten as a blind create → the @@unique([wishlistId,
+// productId]) constraint throws inside the H-29 transaction → the merge
+// propagates → the LOGIN DOOR BREAKS for any returning member who hearted
+// a piece before signing up — the exact P2002-across-the-seam bug class
+// the sibling toggle action's F-3 comment documents as having shipped
+// before (session-3).
+//
+// Assertion design: getWishlistDto reads through a `new Set(...)` — the
+// wishlist PAGE can never render a duplicate even with duplicated rows,
+// so the DOM count is SUPPORTING evidence only; the LOAD-BEARING
+// assertion is the server-truth dbRead count (wishlistItem rows for the
+// user's wishlist × the product == 1) plus the merge COMPLETING (the
+// login lands — a crash here means the redirect never happens).
+//
+// Limiter arithmetic (the F-EE header's measured shapes, SKILL §9 #23):
+// the register bucket was 4 existing + 1/project = 6 < 10 after F-EE;
+// F-GG adds 1/project → 8 < 10 (ONE more register-per-project case fits
+// before the shared "local" bucket saturates). The login door uses the
+// fresh email's OWN per-email key (login:${ip}:${email}) — 1 of 10.
+// logoutAction carries no limiter. james's and admin's buckets stay
+// exactly consumed (10/10) — this case NEVER logs a canonical account in.
+//
+// H-24 posture: NOTHING canonical to clean. The fresh user is `e2e-*@
+// example.com` (the wipe list's exact predicate) — run-scoped; the user-
+// side heart is UI-minted (ZERO SQL fixtures for the state itself — the
+// register door auto-logs-in, the toggle runs on the real session); the
+// guest row is deleted by the merge on success and dropped by token in
+// the finally on mid-case failure; global-setup wipes wishlists at every
+// run start anyway. `cashmere-overcoat` is the round's piece: order
+// fixtures reference it, but NO wishlist spec hearts it (the gown is the
+// first wishlist case's piece on james's session; the hat is F-EE's guest
+// piece and the cart merge's CART-state piece).
+test.describe("guest wishlist merge dedupe half (F-GG, session-36)", () => {
+  test.use(loggedOut);
+
+  test("a login whose guest piece is ALREADY on the user's list completes the merge without duplicating (F-GG)", async ({ page }) => {
+    test.setTimeout(90_000);
+    const email = `e2e-dedupe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
+    const SLUG = "cashmere-overcoat";
+
+    // 1) Register with NO guest cookie — the register door auto-logs-in
+    //    (createSession + redirect), so the pre-load heart needs ZERO
+    //    logins. The register-door merge no-ops (no cookie).
+    await page.goto("/register");
+    await page.getByLabel("Name").fill("E2E Dedupe");
+    await page.getByLabel("Email").fill(email);
+    await page.locator("#password").fill("DedupeTest123");
+    await page.locator("#confirmPassword").fill("DedupeTest123");
+    await page.getByRole("button", { name: /create account/i }).click();
+    await expect(page).toHaveURL(/\/account/, { timeout: 15_000 });
+
+    // 2) PRE-LOAD through the REAL UI: heart the coat as the SIGNED-IN
+    //    user — the user's list now holds the piece BEFORE the merge.
+    await page.goto(`/product/${SLUG}`);
+    const wishBtn = page.locator("main").getByRole("button", { name: /wishlist/i }).first();
+    if ((await wishBtn.textContent())?.match(/In Wishlist/i)) {
+      await wishBtn.click();
+      await expect(wishBtn).toHaveText(/Add to Wishlist/i, { timeout: 10_000 });
+    }
+    await wishBtn.click();
+    await expect(wishBtn).toHaveText(/In Wishlist/i, { timeout: 10_000 });
+
+    // 3) The signed-in toggle mints NO wishlist cookie (getOrCreateWishlist
+    //    returns on the userId branch before the cookie store is touched)
+    //    — the cookie that reaches the login door below is minted ONLY by
+    //    the guest toggle.
+    const cookieAfterUserHeart = (await page.context().cookies()).find(
+      (c) => c.name === "aurelia_wishlist",
+    );
+    expect(cookieAfterUserHeart, "the signed-in toggle mints no wishlist cookie").toBeUndefined();
+
+    // 4) Server truth: the user's wishlist holds EXACTLY 1 item (the coat).
+    const userId = JSON.parse(
+      dbRead(`(p)=>p.user.findUnique({where:{email:${JSON.stringify(email)}}}).then(u=>u.id)`),
+    );
+    const userItems = JSON.parse(
+      dbRead(`(p)=>p.wishlist.findUnique({where:{userId:${JSON.stringify(userId)}}}).then(w=>w.id).then(id=>p.wishlistItem.count({where:{wishlistId:id}}))`),
+    );
+    expect(userItems, "the user's list holds exactly 1 item pre-merge").toBe(1);
+
+    // 5) Sign out — the Sign out control lives in the account tabs (ONLY
+    //    on /account), so the flow returns there first. logoutAction has
+    //    no limiter.
+    await page.goto("/account");
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page).toHaveURL(/\/$/, { timeout: 15_000 });
+
+    // 6) Guest heart the SAME coat — the merge's cookie arrives here.
+    await page.goto(`/product/${SLUG}`);
+    const guestBtn = page.locator("main").getByRole("button", { name: /wishlist/i }).first();
+    await guestBtn.click();
+    await expect(guestBtn).toHaveText(/In Wishlist/i, { timeout: 10_000 });
+
+    // 7) Capture the guest token; server truth: the guest row is real
+    //    (userId null) with EXACTLY 1 item.
+    const guestToken = (await page.context().cookies()).find(
+      (c) => c.name === "aurelia_wishlist",
+    )?.value;
+    expect(guestToken, "the guest wishlist cookie mints").toBeTruthy();
+    expect(guestToken).toMatch(/^[0-9a-f]{48}$/);
+    const guestRow = JSON.parse(
+      dbRead(`(p)=>p.wishlist.findUnique({where:{token:${JSON.stringify(guestToken)}},include:{items:true}}).then(w=>w?{userId:w.userId,items:w.items.length}:null)`),
+    );
+    expect(guestRow, "the guest Wishlist row is real").toBeTruthy();
+    expect(guestRow.userId, "the guest row is anonymous (userId null)").toBeNull();
+    expect(guestRow.items, "the guest row holds exactly 1 item").toBe(1);
+
+    try {
+      // 8) Login as the fresh user through the real form — the LOGIN door
+      //    runs mergeGuestWishlistIntoUser with the guest cookie present;
+      //    the coat is ALREADY on the user's list, so the per-item upsert
+      //    takes the update: {} branch (THE DEDUPE HALF). Pathname
+      //    predicate per the F-EE lesson (?redirect=/wishlist matches the
+      //    pre-navigation URL's QUERY).
+      await page.goto("/login?redirect=/wishlist");
+      await page.getByLabel("Email").fill(email);
+      await page.getByLabel("Password").fill("DedupeTest123");
+      await page.getByRole("button", { name: /sign in/i }).click();
+      await page.waitForURL((u) => new URL(u).pathname === "/wishlist", { timeout: 15_000 });
+
+      // 9) The visible half (SUPPORTING — getWishlistDto reads through a
+      //    Set): the grid shows the coat's card EXACTLY once (ProductCard
+      //    renders TWO anchors per card — image + name), and it persists a
+      //    reload.
+      const grid = page.getByTestId("wishlist-grid");
+      await expect(grid).toBeVisible();
+      await expect(grid.locator(`a[href*="${SLUG}"]`)).toHaveCount(2);
+      await page.reload();
+      await expect(page.getByTestId("wishlist-grid").locator(`a[href*="${SLUG}"]`)).toHaveCount(2);
+
+      // 10) THE LOAD-BEARING ASSERTION — server truth: the user's wishlist
+      //     STILL holds EXACTLY 1 row for the coat (the dedupe union: no
+      //     duplicate row, and above all NO crash — the merge completed).
+      const coatId = JSON.parse(
+        dbRead(`(p)=>p.product.findUnique({where:{slug:${JSON.stringify(SLUG)}}}).then(pr=>pr.id)`),
+      );
+      const overlapCount = JSON.parse(
+        dbRead(`(p)=>p.wishlist.findUnique({where:{userId:${JSON.stringify(userId)}}}).then(w=>w.id).then(id=>p.wishlistItem.count({where:{wishlistId:id,productId:${JSON.stringify(coatId)}}}))`),
+      );
+      expect(overlapCount, "the dedupe union holds exactly ONE row for the overlap").toBe(1);
+
+      // 11) The G-5 visible half + the cleanup half hold on the DEDUPE
+      //     path too: the cookie cleared post-login; the guest row gone.
+      const cookieAfter = (await page.context().cookies()).find(
+        (c) => c.name === "aurelia_wishlist",
+      );
+      expect(cookieAfter, "aurelia_wishlist cleared post-login (dedupe path)").toBeUndefined();
+      const guestGone = JSON.parse(
+        dbRead(`(p)=>p.wishlist.findUnique({where:{token:${JSON.stringify(guestToken)}}}).then(w=>w===null)`),
+      );
+      expect(guestGone, "the guest row is deleted (dedupe path)").toBe(true);
+    } finally {
+      // H-24: the guest row may outlive a mid-case failure (the G-5 rule
+      // keeps the cookie alive on failure BY DESIGN) — drop it by token so
+      // a failed run never leaks rows past its own context.
+      if (guestToken) deleteWishlistRow(guestToken);
+    }
+  });
+});
