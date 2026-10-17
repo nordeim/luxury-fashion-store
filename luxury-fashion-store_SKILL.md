@@ -1,10 +1,10 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.19.0
+version: 1.20.0
 last_updated: 2026-10-17
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
-project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 173/173 unit (19 files) ✓ build ✓ E2E 212 passed + 2 skipped (106 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, the N-1/F-B CSP+JSON-LD gate, the session-21 action-seam security gate, the session-22 SEO metadata gate, the session-23 failure-surfaces gate, and the session-24/25/26 brand-metadata gate — the swan mark, the og cards, the manifest, the font cache, the store-root JSON-LD, the font preloads, the theme-color, security.txt, the auth-page identity + breadcrumb graphs, the canonical links, the product-price metas — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Brand assets: swan mark (icon.svg/favicon.ico/apple-icon), 1200×630 og card, PWA manifest. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
+project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 173/173 unit (19 files) ✓ build ✓ E2E 214 passed + 2 skipped (107 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, the N-1/F-B CSP+JSON-LD gate, the session-21 action-seam security gate, the session-22 SEO metadata gate, the session-23 failure-surfaces gate, and the session-24/25/26/27 brand-metadata gate — the swan mark, the og cards, the manifest, the font cache, the store-root JSON-LD, the font preloads, the theme-color, security.txt, the auth-page identity + breadcrumb graphs, the canonical links, the product-price metas, the PDP's site-level OG identity — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Brand assets: swan mark (icon.svg/favicon.ico/apple-icon), 1200×630 og card, PWA manifest. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
 reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only prototype (inert commerce buttons). This repo is its functional superset with resting-state visual parity."
 ---
 
@@ -94,7 +94,7 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
 | Unit tests | Vitest (node env) | 3.2.7 | 173 tests (19 files: `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` — H-71 added the sweep-tool contract suite; N-1/F-B added `csp` + `structured-data`; F-D added the `serializeJsonLd` contract; F-H added the sitemap/robots SEO contract; F-J added the `isSchemaNotReady` boot-race classifier; F-L added the `buildManifest` installability contract; session-25 added `extractNonce` + `storeRootJsonLd`; session-26 added `breadcrumbJsonLd`) |
-| E2E | Playwright (standalone server) | 1.64.0 | 106 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — the security-csp gate — N-1/F-B — the action-seam security gate — session-21, H-59 closed over the wire — the SEO metadata gate — session-22, F-H — the failure-surfaces gate — session-23, F-I2 + the RSC fallback contract — and the brand-metadata gate — session-24 F-K/F-K2/F-L/F-M + session-25 F-N/F-O/F-P/F-Q + session-26 F-S/F-T/F-V: the swan mark, the og share card, the manifest body, the font cache, the store-root JSON-LD, the font preloads, the theme-color, security.txt, the auth-page identity + breadcrumb graphs, the canonical links, the product-price metas) |
+| E2E | Playwright (standalone server) | 1.64.0 | 107 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — the security-csp gate — N-1/F-B — the action-seam security gate — session-21, H-59 closed over the wire — the SEO metadata gate — session-22, F-H — the failure-surfaces gate — session-23, F-I2 + the RSC fallback contract — and the brand-metadata gate — session-24 F-K/F-K2/F-L/F-M + session-25 F-N/F-O/F-P/F-Q + session-26 F-S/F-T/F-V + session-27 F-W: the swan mark, the og share card, the manifest body, the font cache, the store-root JSON-LD, the font preloads, the theme-color, security.txt, the auth-page identity + breadcrumb graphs, the canonical links, the product-price metas, the PDP's site-level OG identity) |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -659,6 +659,24 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
     SITE entities, not home-only); after ANY head/asset round, treat the
     20b census as the verdict, not the plan's rest-invariance prediction.
 
+41. **[MEDIUM] Next.js metadata merges SHALLOWLY per segment — a child
+    `openGraph`/`twitter` object REPLACES the root's wholesale.** Session-27's
+    fresh audit found the PDP head serving NO `og:type`, `og:site_name`, or
+    `og:url` while every other page carried them: the F-K2 wiring declared
+    `openGraph: { images: [{ url }] }` on the PDP, and Next's per-segment
+    shallow merge discarded the root layout's
+    `{ siteName, type: "website", url }` instead of deep-merging it (the
+    PDP's og:image also lost the root card's `og:image:type/width/height`
+    annotations — the file convention knows its own PNG's dimensions; a
+    remote URL's are not statically known). og:type ABSENT is invisible to
+    every visual gate and every console check — only a served-bytes head
+    probe sees it. Fix: per-page overrides re-declare the site-level fields
+    (the honest `type: "website"`; og:url keeps the site-wide origin
+    convention — the canonical link carries the per-page identity), pinned
+    by a brand-metadata case. Symptom family: "one page's share card is
+    missing fields every other page has" → look for a child metadata
+    override on that route BEFORE suspecting the root layout.
+
 ## §10 Debugging Guide (symptom → cause → fix)
 
 | Symptom | Root cause | Fix |
@@ -695,12 +713,13 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
 | E2E fails only on the SECOND run; drawer/cart specs see extra lines | Cross-run residue: the seed never deletes (§ session-5 H-22) | `global-setup` wipes carts/wishlists/sessions — keep it |
 | E2E drawer specs see TWO lines with one add (session-6, mid-run) | Within-run residue: the merge test left its line; fixed by cleaning up after itself + wiping ALL orders at setup (H-24/H-25) | `global-setup` order wipe + re-seed; specs that mutate shared state clean up |
 | Census drifts +2 mainKids / two h-0 secs after a "head-layer" round (session-25, trap #40) | Body-embedded JSON-LD data blocks rendered INSIDE `<main>` — script elements are main children at zero height | Render data blocks outside `<main>` (the storefront layout — site entities); re-run the two-census ritual before believing any rest-invariance claim |
+| One page's share card is missing og:type / og:site_name / og:url while every other page carries them (session-27, trap #41, F-W) | Next metadata merges SHALLOWLY per segment — that route's child `openGraph` override replaced the root block wholesale | Re-declare the site-level fields in the child `openGraph` (honest `type: "website"`, siteName, the origin og:url); pin with a served-bytes brand-metadata case |
 
 ## §11 Pre-Ship Checklist
 
 ```bash
 npm run verify                      # typecheck → lint → 173 unit → build (+ assemble)
-npm run test:e2e                    # 106 cases × 2 projects (+2 setup; build FIRST — §9 #16)
+npm run test:e2e                    # 107 cases × 2 projects (+2 setup; build FIRST — §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present, nonce'd (no unsafe-inline/eval in prod)
 
 # Parity pins
@@ -1030,6 +1049,7 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Brand metadata assets (session-24, F-K/F-K2/F-L/F-M) | `src/app/icon.svg` + `src/app/favicon.ico` (16/32/48) + `src/app/apple-icon.png` — the swan mark in the measured colors (`#404040` circle / `#F4ECD6` swan), rendered by `scripts/brand-assets.cjs` (chromium) + `scripts/png-to-ico.py` (explicit ICO container — Pillow's ICO save resamples from one base; the exact per-size renders ship verbatim) · `src/app/opengraph-image.png` (1200×630 card — auto-injects og:image/twitter:image on every route) · PDP og:image = the product's first photo (`parseProductImages` in `src/lib/products.ts` — malformed JSON degrades to the root card, never throws) · `src/lib/manifest.ts` (`buildManifest`, unit-pinned) + `src/app/manifest.ts` (STATIC route — origin-independent, DB-free) · fonts immutable caching (`next.config.ts` `/fonts/:file*`) · the gate: `tests/e2e/brand-metadata.spec.ts` (served artifacts + head tags + manifest body + cache header) |
 | Store-root identity + transport (session-25, F-N/F-O/F-P/F-Q) | `src/lib/structured-data.ts` `storeRootJsonLd(origin)` (the reference-measured WebSite + Organization graphs, logo = the self-hosted `/icons/icon-512.png`) rendered by the (storefront) LAYOUT — outside `<main>` (trap #40) — with the request nonce via `src/lib/csp.ts` `extractNonce` (hand-rendered data blocks are NOT nonce-stamped by Next; the security-csp per-tag assertion runs on `/`) · first-paint font preloads (`src/app/layout.tsx` `<head>`: cormorant-300 + montserrat-300/400, `crossorigin` REQUIRED even same-origin) · `viewport.themeColor = "#F8F7F6"` (mobile chrome tint = the manifest's brand color) · `public/.well-known/security.txt` (RFC 9116; Expires renews yearly) · gate: `brand-metadata.spec.ts` cases 7-10 |
 | Structure parity + auth identity + canonicals + product OG (session-26, F-R/F-S/F-T/F-V) | **F-R**: the newsletter band renders INSIDE `<main>` (`(storefront)/layout.tsx` — the reference moved its band inside its main: round-21a census mainKids 10→11 BOTH viewports, pageH byte-unchanged; the 21b census is the verdict) · **F-S**: `breadcrumbJsonLd(entries, origin)` (the measured BreadcrumbList shape — 1-based positions, absolutized items) + the NEW `(auth)/layout.tsx` (site-level WebSite + Organization blocks for the chrome-less group; served order = layout blocks then the page breadcrumb — byte-matching the reference's login head) + per-page breadcrumbs on login/register · **F-T**: `alternates.canonical` on `/` `/shop` `/login` `/register` (home renders the BARE ORIGIN — Next's `resolveAbsoluteUrlWithPathname` collapses pathname `/` to `result.origin`; RFC-3986-equivalent to the reference's trailing-slash form) + the PDP's existing canonical finally pinned · **F-V**: the PDP's `metadata.other` ships `product:price:amount` (cents→dollars, the JSON-LD arithmetic) + `product:price:currency` (name-attributed — Next's `other` contract; og:type stays `website`: the OpenGraphType union lacks "product", a cast was rejected) · **gate lesson**: the auth pages REDIRECT a session — auth-surface cases need the empty-storageState opt-out (the a11y/auth specs' pattern) · gate: `brand-metadata.spec.ts` session-26 describe |
+| PDP site-level OG identity (session-27, F-W) | Next metadata merges SHALLOWLY per segment — the PDP's child `openGraph` (the F-K2 product image) had REPLACED the root layout's site-level block, silently dropping `og:type` / `og:site_name` / `og:url` from the served PDP head (served-bytes verified; every other page carries them; og:type ABSENT is invisible to visual gates and console checks — trap #41). Fix: the PDP's `openGraph` re-declares `type: "website"` (honest — the union lacks "product"), `siteName: "AURELIA"`, `url: siteUrl` (the site-wide origin convention; the canonical link carries the per-page identity); the og:image keeps no width/height/type annotations (remote URL dimensions not statically known — documented residual) · gate: `brand-metadata.spec.ts` "the PDP head carries the site-level OG identity fields" (surgical mutation demo: only that case fails with the fields dropped) |
 | Sale countdown seam | `src/lib/countdown.ts` + `src/components/store/sale-countdown.tsx` |
 | Catalog source of truth | `src/lib/data/catalog.ts` (incl. HERO_SLIDES.align + BRAND_MARQUEE + COLOR_HEX) |
 | Seed | `prisma/seed.ts` (`npm run db:setup`) |

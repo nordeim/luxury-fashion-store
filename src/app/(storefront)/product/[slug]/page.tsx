@@ -24,11 +24,32 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
   // allowed by images.remotePatterns). Inherits the root card as fallback
   // semantics via metadataBase resolution.
   const images = parseProductImages(product.images);
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
   return {
     title: product.name,
     description: product.description,
     alternates: { canonical: `/product/${product.slug}` },
-    openGraph: images.length > 0 ? { images: [{ url: images[0] }] } : undefined,
+    // F-W (session-27): Next merges metadata SHALLOWLY per segment — this
+    // child `openGraph` REPLACES the root layout's site-level block
+    // wholesale (no deep-merge), which silently dropped og:type /
+    // og:site_name / og:url from the served PDP head while every other page
+    // carries them (served-bytes verified). Re-declared here. Two documented
+    // residuals: og:type stays "website" (the honest type — Next's
+    // OpenGraphType union lacks "product", a cast was rejected, session-26)
+    // and og:url keeps the site-wide origin convention the root declares for
+    // every page (the canonical link above carries the per-page identity).
+    // The og:image keeps no type/width/height annotations: the remote
+    // catalog URL's dimensions are not statically known (the root card's
+    // annotations come from its file-convention PNG).
+    openGraph:
+      images.length > 0
+        ? {
+            type: "website",
+            siteName: "AURELIA",
+            url: siteUrl,
+            images: [{ url: images[0] }],
+          }
+        : undefined,
     // F-V (session-26): the product price on the share surface — the
     // cents→dollars arithmetic the Product JSON-LD unit-pins. Next 16.4's
     // typed escape hatch for custom metas is the TOP-LEVEL `Metadata.other`

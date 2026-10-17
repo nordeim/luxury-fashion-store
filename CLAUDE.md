@@ -30,7 +30,7 @@ A production-grade luxury fashion e-commerce storefront and admin console — a 
 1. **Reproduce/read first** — for bugs, reproduce in the browser or a test before touching code. For features, read the nearest parity surface and the action seam you'll extend.
 2. **Plan the seam** — decide which layer changes: page (RSC) → component → action (mutation) → validation → schema. Mutations ALWAYS go through `src/lib/actions/`.
 3. **Implement minimal + typed** — strict TS; no `any`; DTOs flow server→client as props.
-4. **Gate locally** — `npm run verify` (typecheck → lint → 173 unit tests → build), then `npm run test:e2e` (106 E2E cases × 2 device projects + 2 setup — includes the automated axe a11y gate across logged-out, logged-in, AND admin surfaces, the CSP/JSON-LD security gate, the action-seam security gate — crafted server-action POSTs over the wire — the SEO metadata gate, the failure-surfaces gate: the 404 card + the RSC-fallback hard-navigation contract, and the brand-metadata gate: the swan mark over the wire, the og share cards, the manifest body, the immutable font cache, the store-root WebSite/Organization JSON-LD with nonce-carrying data blocks, the first-paint font preloads, the theme-color tint, the security.txt contract, the auth-page identity + breadcrumb graphs, the canonical links, and the product-price metas). All must pass before commit.
+4. **Gate locally** — `npm run verify` (typecheck → lint → 173 unit tests → build), then `npm run test:e2e` (107 E2E cases × 2 device projects + 2 setup — includes the automated axe a11y gate across logged-out, logged-in, AND admin surfaces, the CSP/JSON-LD security gate, the action-seam security gate — crafted server-action POSTs over the wire — the SEO metadata gate, the failure-surfaces gate: the 404 card + the RSC-fallback hard-navigation contract, and the brand-metadata gate: the swan mark over the wire, the og share cards, the manifest body, the immutable font cache, the store-root WebSite/Organization JSON-LD with nonce-carrying data blocks, the first-paint font preloads, the theme-color tint, the security.txt contract, the auth-page identity + breadcrumb graphs, the canonical links, the product-price metas, and the PDP's site-level OG identity surviving its own openGraph override). All must pass before commit.
 5. **Verify in the browser** — dev server + `agent-browser` for visual/behavioral checks; screenshots for parity surfaces live in `docs/screenshots/`.
 6. **Document drift** — if you changed a pinned contract (env, db path, parity pins, test strategy), update `AGENTS.md` + the PAD in the same commit.
 
@@ -82,7 +82,7 @@ See the command table in `AGENTS.md`. The pre-commit gate is exactly:
 
 ```bash
 npm run verify        # typecheck → lint → unit → build
-npm run test:e2e      # 106 E2E cases × 2 device projects + 2 setup
+npm run test:e2e      # 107 E2E cases × 2 device projects + 2 setup
 ```
 
 ## Escalation Rules

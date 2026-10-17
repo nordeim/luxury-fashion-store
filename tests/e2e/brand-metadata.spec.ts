@@ -48,6 +48,15 @@
 // 11. F-V — the PDP carries the product price for share crawlers via the
 //     typed Metadata.other contract (name-attributed; og:type stays website
 //     — Next's OpenGraphType lacks "product", a cast was rejected).
+//
+// Session-27 extension (F-W — the PDP's site-level OG identity):
+//
+// 12. F-W — Next merges metadata SHALLOWLY per segment: the PDP's child
+//     `openGraph` (the F-K2 product image) REPLACED the root layout's
+//     site-level block wholesale, silently dropping og:type / og:site_name /
+//     og:url from the PDP head (served-bytes verified — every other page
+//     carries them). The re-declared fields pin here so the drift cannot
+//     recur.
 import { expect, test } from "@playwright/test";
 
 const PDP_PATH = "/product/silk-draped-evening-gown"; // the L-2 seed-contract slug
@@ -237,6 +246,27 @@ test.describe("brand metadata assets (F-K / F-K2 / F-L / F-M / F-N / F-O / F-P /
   // F-V (session-26): the product price on the share surface — moved to the
   // session-26 describe below (it groups the logged-out opt-out the auth
   // surfaces need).
+
+  // F-W (session-27): the site-level OG identity survives the PDP's child
+  // openGraph override — Next shallow-merges metadata per segment, so the
+  // override had replaced the root block (og:type / og:site_name / og:url
+  // vanished from the served PDP head while every other page carries them).
+  test("the PDP head carries the site-level OG identity fields", async ({
+    request,
+  }) => {
+    const res = await request.get(PDP_PATH);
+    expect(res.status()).toBe(200);
+    const html = await res.text();
+    // Exact served-bytes serialization (Next emits property-attributed og
+    // metas; the og:url keeps the site-wide origin convention — the root
+    // layout's declaration — while the canonical link carries the per-page
+    // identity).
+    expect(html).toContain('<meta property="og:type" content="website"/>');
+    expect(html).toContain('<meta property="og:site_name" content="AURELIA"/>');
+    expect(html).toContain(
+      '<meta property="og:url" content="http://localhost:3000"/>'
+    );
+  });
 });
 
 // Session-26 extension (F-S / F-T / F-V): the auth pages REDIRECT a session
