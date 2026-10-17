@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { Header } from "@/components/store/header";
 import { MobileNav } from "@/components/store/mobile-nav";
 import { CartDrawer } from "@/components/store/cart-drawer";
@@ -8,6 +9,8 @@ import { Footer } from "@/components/store/footer";
 import { StoreProvider } from "@/components/store/store-provider";
 import { getCurrentUser } from "@/lib/auth";
 import { getCartDto, getWishlistDto } from "@/lib/cart";
+import { extractNonce } from "@/lib/csp";
+import { serializeJsonLd, storeRootJsonLd } from "@/lib/structured-data";
 
 // Storefront group layout — the shopper chrome composition point (ADR-008:
 // chrome lives HERE so the chrome-less (auth) group never renders it).
@@ -27,8 +30,36 @@ export default async function StorefrontLayout({
     getWishlistDto(user?.id ?? null),
   ]);
 
+  // F-N (session-25): the store-root identity graphs — the reference's home
+  // head carries WebSite + Organization JSON-LD (measured first-hand); the
+  // clone shipped zero. They render HERE (outside <main>) because they are
+  // SITE-level entities and because body-embedded data blocks inside main
+  // would register as main children and break the census byte-equality
+  // ritual (caught first-hand by the round-20b sweep). Data blocks are
+  // CSP-exempt by spec, but they carry the request nonce anyway: the
+  // security-csp gate asserts every inline script in the served home HTML
+  // carries it (a data block matches that regex), and Next stamps only the
+  // scripts it controls — a hand-rendered block is nonceless without this
+  // (wire-verified on the PDP's block). Dev (no nonce) omits the attribute.
+  const cspHeader = (await headers()).get("content-security-policy") ?? "";
+  const nonce = extractNonce(cspHeader) ?? undefined;
+
   return (
-    <StoreProvider
+    <>
+      {storeRootJsonLd(
+        process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
+      ).map((block) => (
+        <script
+          key={block["@type"]}
+          type="application/ld+json"
+          nonce={nonce}
+          // The F-D discipline (the codebase's raw-HTML sinks stay enumerated
+          // and escaped): serializeJsonLd escapes `<` so no future string
+          // value can terminate the data block early.
+          dangerouslySetInnerHTML={{ __html: serializeJsonLd(block) }}
+        />
+      ))}
+      <StoreProvider
       initialCart={cart}
       initialUser={user ? { id: user.id, email: user.email, name: user.name, role: user.role } : null}
       initialWishlist={[...wishlist.productIds]}
@@ -62,6 +93,7 @@ export default async function StorefrontLayout({
       <main id="main-content" tabIndex={-1} className="min-h-[60vh] focus:outline-none">{children}</main>
       <Newsletter />
       <Footer />
-    </StoreProvider>
+      </StoreProvider>
+    </>
   );
 }

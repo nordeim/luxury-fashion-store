@@ -4,6 +4,14 @@ import { StorefrontHome } from "@/components/store/storefront-home";
 
 // Home — parity surface (12 sections in reference order). All product
 // selection happens server-side; the client island renders.
+//
+// F-N (session-25): the WebSite + Organization JSON-LD lives in the
+// (storefront) layout, NOT here — the layout composes the page outside
+// <main>, and body-embedded data blocks inside main would register as
+// main children (h-0 secs entries) and break the census's byte-equality
+// ritual (caught first-hand by the round-20b sweep — mainKids 10→12).
+// WebSite/Organization are SITE-level entities, so layout-level rendering
+// is also the schema.org-correct placement.
 
 export const dynamic = "force-dynamic";
 

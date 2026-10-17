@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { productJsonLd, serializeJsonLd } from "./structured-data";
+import { productJsonLd, serializeJsonLd, storeRootJsonLd } from "./structured-data";
 import type { ProductCardData } from "./products";
 
 // F-B (session-19): the README has documented the PDP's JSON-LD since the
@@ -114,5 +114,57 @@ describe("serializeJsonLd", () => {
   it("is byte-identical to plain JSON.stringify on current seed data (rest-invariance contract)", () => {
     const ld = productJsonLd(FIXTURE, "https://aurelia.example");
     expect(serializeJsonLd(ld)).toBe(JSON.stringify(ld));
+  });
+});
+
+// F-N (session-25): the store-root identity graphs. The reference's home head
+// carries TWO builder-injected blocks — WebSite {name, url} and Organization
+// {name, logo, url} — measured first-hand (2026-10-17); the clone shipped
+// zero. storeRootJsonLd mirrors that measured shape with the clone's OWN
+// self-hosted mark as the Organization logo (absolutized via the established
+// contract — no third-party runtime dependency).
+describe("storeRootJsonLd", () => {
+  const ORIGIN = "https://aurelia.example";
+  const blocks = storeRootJsonLd(ORIGIN);
+
+  it("returns exactly two graphs in reference order: WebSite then Organization", () => {
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]["@type"]).toBe("WebSite");
+    expect(blocks[1]["@type"]).toBe("Organization");
+  });
+
+  it("mirrors the measured WebSite shape (context, name, url)", () => {
+    expect(blocks[0]).toEqual({
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: "AURELIA",
+      url: ORIGIN,
+    });
+  });
+
+  it("mirrors the measured Organization shape with the self-hosted mark as logo", () => {
+    expect(blocks[1]).toEqual({
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      name: "AURELIA",
+      logo: `${ORIGIN}/icons/icon-512.png`,
+      url: ORIGIN,
+    });
+  });
+
+  it("normalizes a trailing-slash origin (no double slashes in url/logo)", () => {
+    const slashed = storeRootJsonLd("https://aurelia.example/");
+    expect(slashed[0].url).toBe(ORIGIN);
+    expect(slashed[1].url).toBe(ORIGIN);
+    expect(slashed[1].logo).toBe(`${ORIGIN}/icons/icon-512.png`);
+  });
+
+  it("carries exactly the measured field sets (no invented extras)", () => {
+    expect(Object.keys(blocks[0]).sort()).toEqual(
+      ["@context", "@type", "name", "url"].sort()
+    );
+    expect(Object.keys(blocks[1]).sort()).toEqual(
+      ["@context", "@type", "logo", "name", "url"].sort()
+    );
   });
 });

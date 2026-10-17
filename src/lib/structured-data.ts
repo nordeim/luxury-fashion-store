@@ -72,3 +72,49 @@ export function serializeJsonLd(value: unknown): string {
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
 }
+
+// F-N (session-25): the store-root identity graphs. The reference's home head
+// carries TWO builder-injected blocks (measured first-hand, 2026-10-17):
+// WebSite {name, url} and Organization {name, logo, url}. The clone shipped
+// zero — a parity gap in the non-visual layer (the PDP's Product graph never
+// covered the store identity). The Organization logo is the clone's OWN
+// self-hosted swan mark (the F-K asset), absolutized with the same contract
+// as the product images — no third-party runtime dependency.
+
+export interface WebsiteJsonLd {
+  "@context": "https://schema.org";
+  "@type": "WebSite";
+  name: string;
+  url: string;
+}
+
+export interface OrganizationJsonLd {
+  "@context": "https://schema.org";
+  "@type": "Organization";
+  name: string;
+  logo: string;
+  url: string;
+}
+
+/** Build the store-root identity graphs (pure; mirrors the reference's two-block shape). */
+export function storeRootJsonLd(origin: string): [WebsiteJsonLd, OrganizationJsonLd] {
+  // The store root IS the origin — the measured reference url carries no
+  // trailing slash (absolutize("/") would keep one; the identity graphs pin
+  // the origin itself, slash-normalized).
+  const url = origin.replace(/\/$/, "");
+  return [
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: "AURELIA",
+      url,
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      name: "AURELIA",
+      logo: absolutize("/icons/icon-512.png", origin),
+      url,
+    },
+  ];
+}

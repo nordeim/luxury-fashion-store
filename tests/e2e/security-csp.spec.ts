@@ -100,11 +100,18 @@ test.describe("security CSP + structured data (N-1/F-B)", () => {
 
   test("PDP embeds parseable Product JSON-LD with the seeded price", async ({ page }) => {
     await page.goto(SEEDED_GOWN, { waitUntil: "load" });
+    // Session-25: the storefront layout renders the site-level WebSite +
+    // Organization identity blocks on EVERY storefront page (outside <main>),
+    // so the PDP now serves THREE data blocks — select the Product graph by
+    // its @type, never by document position.
     const raw = await page
       .locator('script[type="application/ld+json"]')
-      .first()
-      .textContent();
-    expect(raw, "JSON-LD data block present").toBeTruthy();
+      .evaluateAll((els) =>
+        els
+          .map((el) => el.textContent ?? "")
+          .find((t) => t.includes('"@type":"Product"'))
+      );
+    expect(raw, "Product JSON-LD data block present").toBeTruthy();
     const ld = JSON.parse(raw as string) as {
       "@type": string;
       name: string;

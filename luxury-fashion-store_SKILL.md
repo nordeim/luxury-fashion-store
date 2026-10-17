@@ -1,10 +1,10 @@
 ---
 name: luxury-fashion-store
 description: "Engineering skill for the AURELIA (VELOUR) luxury-fashion e-commerce codebase — Next.js 16 App Router + React 19 + Tailwind v4 + Prisma/SQLite. Use when extending, debugging, onboarding, or replicating this storefront: server-action mutation seams, Tailwind v4 parity pins (hsl() literals, flex gap stacking), standalone-bundle assembly, schema-relative SQLite resolution, and the two-layer vitest/playwright test architecture."
-version: 1.17.0
+version: 1.18.0
 last_updated: 2026-10-17
 tags: [nextjs, react19, tailwind-v4, prisma, sqlite, ecommerce, server-actions, playwright, vitest, design-parity]
-project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 160/160 unit (19 files) ✓ build ✓ E2E 198 passed + 2 skipped (99 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, the N-1/F-B CSP+JSON-LD gate, the session-21 action-seam security gate, the session-22 SEO metadata gate, the session-23 failure-surfaces gate, and the session-24 brand-metadata gate — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Brand assets: swan mark (icon.svg/favicon.ico/apple-icon), 1200×630 og card, PWA manifest. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
+project_state: "Production-ready. Gates: typecheck ✓ lint ✓ 169/169 unit (19 files) ✓ build ✓ E2E 206 passed + 2 skipped (103 unique cases × chromium+mobile — incl. the K-1/L-1/M-1 axe a11y gate, 14 surfaces incl. logged-in AND admin, the N-1/F-B CSP+JSON-LD gate, the session-21 action-seam security gate, the session-22 SEO metadata gate, the session-23 failure-surfaces gate, and the session-24/25 brand-metadata gate — the swan mark, the og cards, the manifest, the font cache, the store-root JSON-LD, the font preloads, the theme-color, security.txt — two desktop-only pins skip on mobile; + 2 setup projects). 13 Prisma models. Brand assets: swan mark (icon.svg/favicon.ico/apple-icon), 1200×630 og card, PWA manifest. Demo: james@example.com/Demo1234! (customer), admin@aurelia.com/Admin1234! (admin)."
 reference_site: "pastel-aurelia-fashion-edit.base44.app — a visual-only prototype (inert commerce buttons). This repo is its functional superset with resting-state visual parity."
 ---
 
@@ -93,8 +93,8 @@ role-gated admin, working PLP/PDP (the reference's `/shop` 404s on itself).
 | Styling | Tailwind CSS (CSS-first `@theme`) | 4.3.3 | v4 traps — see §9 #1–#2 |
 | ORM / DB | Prisma + SQLite (single file) | 6.19.3 | 13 models, `db/custom.db` |
 | Validation | Zod | 3.25.76 | every seam |
-| Unit tests | Vitest (node env) | 3.2.7 | 160 tests (19 files: `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` — H-71 added the sweep-tool contract suite; N-1/F-B added `csp` + `structured-data`; F-D added the `serializeJsonLd` contract; F-H added the sitemap/robots SEO contract; F-J added the `isSchemaNotReady` boot-race classifier; F-L added the `buildManifest` installability contract) |
-| E2E | Playwright (standalone server) | 1.64.0 | 99 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — the security-csp gate — N-1/F-B — the action-seam security gate — session-21, H-59 closed over the wire — the SEO metadata gate — session-22, F-H — the failure-surfaces gate — session-23, F-I2 + the RSC fallback contract — and the brand-metadata gate — session-24, F-K/F-K2/F-L/F-M: the swan mark, the og share card, the manifest body, the font cache) |
+| Unit tests | Vitest (node env) | 3.2.7 | 169 tests (19 files: `src/lib/*.test.ts` + `tests/unit/sweep-lib.test.ts` — H-71 added the sweep-tool contract suite; N-1/F-B added `csp` + `structured-data`; F-D added the `serializeJsonLd` contract; F-H added the sitemap/robots SEO contract; F-J added the `isSchemaNotReady` boot-race classifier; F-L added the `buildManifest` installability contract; session-25 added `extractNonce` + `storeRootJsonLd`) |
+| E2E | Playwright (standalone server) | 1.64.0 | 103 unique cases × 2 device projects (+2 setup; incl. the accessibility-axe gate — K-1/L-1/M-1 — the security-csp gate — N-1/F-B — the action-seam security gate — session-21, H-59 closed over the wire — the SEO metadata gate — session-22, F-H — the failure-surfaces gate — session-23, F-I2 + the RSC fallback contract — and the brand-metadata gate — session-24 F-K/F-K2/F-L/F-M + session-25 F-N/F-O/F-P/F-Q: the swan mark, the og share card, the manifest body, the font cache, the store-root JSON-LD, the font preloads, the theme-color, security.txt) |
 | Icons | lucide-react | 0.545.0 | header icon cluster |
 | Auth | custom scrypt + DB sessions | — | HMAC-signed httpOnly cookies |
 
@@ -641,6 +641,20 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
     BEFORE moving on (a follow-up `vitest run` of the touched file is the
     cheap verifier).
 
+40. **[MEDIUM] The zero-drift census is NOT head-excluded for BODY-embedded
+    non-visuals — a `<main>`-child data block registers as a census child.**
+    Session-25's first round-20b run drifted on mainKids 10→12 (both
+    viewports): the home page's two new JSON-LD data blocks rendered inside
+    `<main>` (the storefront layout wraps children in main), and script
+    elements are main CHILDREN to `querySelector('main').children` even at
+    zero height — two h-0 `secs` entries and a +2 mainKids. The plan's
+    "head-layer, rest-invisible by construction" claim was true for the
+    head tags (theme-color/preloads) but false for body-embedded scripts.
+    Fix: render site-level data blocks OUTSIDE `<main>` — the (storefront)
+    layout is the right composition point anyway (WebSite/Organization are
+    SITE entities, not home-only); after ANY head/asset round, treat the
+    20b census as the verdict, not the plan's rest-invariance prediction.
+
 ## §10 Debugging Guide (symptom → cause → fix)
 
 | Symptom | Root cause | Fix |
@@ -676,12 +690,13 @@ Former roadmap gaps CLOSED in session-11: skip-to-content +
 | Drawer/modal keyboard users Tab into the page behind | Hand-rolled dialogs never moved focus or trapped Tab (H-26) | `installFocusTrap` in the surface's open-effect (`src/lib/focus-trap.ts`) — keep it on every new hand-rolled dialog |
 | E2E fails only on the SECOND run; drawer/cart specs see extra lines | Cross-run residue: the seed never deletes (§ session-5 H-22) | `global-setup` wipes carts/wishlists/sessions — keep it |
 | E2E drawer specs see TWO lines with one add (session-6, mid-run) | Within-run residue: the merge test left its line; fixed by cleaning up after itself + wiping ALL orders at setup (H-24/H-25) | `global-setup` order wipe + re-seed; specs that mutate shared state clean up |
+| Census drifts +2 mainKids / two h-0 secs after a "head-layer" round (session-25, trap #40) | Body-embedded JSON-LD data blocks rendered INSIDE `<main>` — script elements are main children at zero height | Render data blocks outside `<main>` (the storefront layout — site entities); re-run the two-census ritual before believing any rest-invariance claim |
 
 ## §11 Pre-Ship Checklist
 
 ```bash
-npm run verify                      # typecheck → lint → 160 unit → build (+ assemble)
-npm run test:e2e                    # 99 cases × 2 projects (+2 setup; build FIRST — §9 #16)
+npm run verify                      # typecheck → lint → 169 unit → build (+ assemble)
+npm run test:e2e                    # 103 cases × 2 projects (+2 setup; build FIRST — §9 #16)
 curl -sI localhost:3000/ | grep -i content-security   # CSP present, nonce'd (no unsafe-inline/eval in prod)
 
 # Parity pins
@@ -1005,10 +1020,11 @@ are indexed (`CartItem.cartId`, `OrderItem.orderId`, `OrderEvent.orderId`,
 | Sweep tool primitives (H-71) | `scripts/sweep-lib.cjs` + `tests/unit/sweep-lib.test.ts` (waitHealth/assertPortFree contract pinned) |
 | Automated a11y gate (K-1/L-1/M-1) | `tests/e2e/accessibility-axe.spec.ts` (axe-core; 14 surfaces incl. logged-in + SQL-minted admin, self-cleaning; zero WCAG 2.0/2.1 A+AA violations, color-contrast excluded by parity law; `bypassCSP` for the harness injection) + `tests/e2e/e2e-secrets.ts` (the shared offline-HMAC secret) |
 | Security CSP seam (N-1) | `src/proxy.ts` (per-request nonce, request+response headers) + `src/lib/csp.ts` (pure directives, unit-pinned) + `tests/e2e/security-csp.spec.ts` (header shape, nonce-in-bytes, hydration, route coverage, JSON-LD) |
-| Product JSON-LD (F-B) | `src/lib/structured-data.ts` (`productJsonLd` pure + `serializeJsonLd` — the F-D HTML-safe embedding) + the PDP page's data block (non-executing — CSP-exempt, census-invisible; the codebase's ONLY `dangerouslySetInnerHTML`) |
+| Product JSON-LD (F-B) | `src/lib/structured-data.ts` (`productJsonLd` pure + `serializeJsonLd` — the F-D HTML-safe embedding) + the PDP page's data block (non-executing — CSP-exempt, nonceless by design; the per-tag nonce assertion runs on `/` only). Session-25: `dangerouslySetInnerHTML` is no longer SINGULAR — the storefront layout's identity blocks use the same serializer (both sinks enumerated, both escaped; see the session-25 row) |
 | Action-seam security gate (session-21, H-59) | `tests/e2e/action-seam-security.spec.ts` — drives the PDP's server actions by direct POST (`Next-Action: <id>` + a JSON-array body; ids read from the standalone's per-route `server-reference-manifest.json` — the build-shape canary); the WRITE-FREE probe ladder (P1 classify → P2 split → P3 the H-59 payload) proves a foreign size is rejected over the wire with zero Set-Cookie and zero rows; the IDOR census proves a SQL-fixture guest bag line survives unauthenticated cart-line probes; the fail-closed census sweeps every candidate × write-free payload (always 200 + ok:false, never 5xx, never Set-Cookie) |
 | SEO metadata seam (session-22, F-H/F-H2) | `src/lib/sitemap.ts` (`siteOrigin` default-origin fallback + normalization; `buildSitemapEntries` — statics first, ACTIVE products only; `buildRobots` — the exact allow/disallow set; unit-pinned) + `src/app/sitemap.ts` / `src/app/robots.ts` (`force-dynamic` — the build stays DB-free) + `tests/e2e/seo.spec.ts` (asserts the SERVED BODY on the documented default origin — the lesson of F-H2: the scaffold's foreign `public/` statics had answered for 21 sessions) |
 | Brand metadata assets (session-24, F-K/F-K2/F-L/F-M) | `src/app/icon.svg` + `src/app/favicon.ico` (16/32/48) + `src/app/apple-icon.png` — the swan mark in the measured colors (`#404040` circle / `#F4ECD6` swan), rendered by `scripts/brand-assets.cjs` (chromium) + `scripts/png-to-ico.py` (explicit ICO container — Pillow's ICO save resamples from one base; the exact per-size renders ship verbatim) · `src/app/opengraph-image.png` (1200×630 card — auto-injects og:image/twitter:image on every route) · PDP og:image = the product's first photo (`parseProductImages` in `src/lib/products.ts` — malformed JSON degrades to the root card, never throws) · `src/lib/manifest.ts` (`buildManifest`, unit-pinned) + `src/app/manifest.ts` (STATIC route — origin-independent, DB-free) · fonts immutable caching (`next.config.ts` `/fonts/:file*`) · the gate: `tests/e2e/brand-metadata.spec.ts` (served artifacts + head tags + manifest body + cache header) |
+| Store-root identity + transport (session-25, F-N/F-O/F-P/F-Q) | `src/lib/structured-data.ts` `storeRootJsonLd(origin)` (the reference-measured WebSite + Organization graphs, logo = the self-hosted `/icons/icon-512.png`) rendered by the (storefront) LAYOUT — outside `<main>` (trap #40) — with the request nonce via `src/lib/csp.ts` `extractNonce` (hand-rendered data blocks are NOT nonce-stamped by Next; the security-csp per-tag assertion runs on `/`) · first-paint font preloads (`src/app/layout.tsx` `<head>`: cormorant-300 + montserrat-300/400, `crossorigin` REQUIRED even same-origin) · `viewport.themeColor = "#F8F7F6"` (mobile chrome tint = the manifest's brand color) · `public/.well-known/security.txt` (RFC 9116; Expires renews yearly) · gate: `brand-metadata.spec.ts` cases 7-10 |
 | Sale countdown seam | `src/lib/countdown.ts` + `src/components/store/sale-countdown.tsx` |
 | Catalog source of truth | `src/lib/data/catalog.ts` (incl. HERO_SLIDES.align + BRAND_MARQUEE + COLOR_HEX) |
 | Seed | `prisma/seed.ts` (`npm run db:setup`) |

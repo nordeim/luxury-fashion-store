@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCspHeader, mintNonce } from "./csp";
+import { buildCspHeader, extractNonce, mintNonce } from "./csp";
 
 // N-1 (session-19): the CSP seam. Production script-src must be nonce-only —
 // 'unsafe-inline' is retired. Dev keeps the F-7 escape hatch (React's dev
@@ -93,5 +93,36 @@ describe("mintNonce", () => {
     const source = scriptSrcOf(header).split(" ").find((s) => s.startsWith("'nonce-"));
     expect(source).toBe(`'nonce-${nonce}'`);
     expect((source as string).slice(7, -1)).toMatch(NEXT_NONCE_REGEX);
+  });
+});
+
+// F-N (session-25): the home page's JSON-LD data blocks must carry the exact
+// request nonce in the served bytes (the security-csp gate's per-tag
+// assertion runs on `/`) — so the home page extracts the nonce from the
+// request's CSP header (set on BOTH directions by src/proxy.ts). extractNonce
+// is that pure step: the nonce source from a full header value, or null when
+// the header carries no nonce (dev, or the nonceless production fallback —
+// the attribute is simply omitted there).
+describe("extractNonce", () => {
+  it("extracts the nonce from a production CSP header (round-trip)", () => {
+    const nonce = mintNonce();
+    const header = buildCspHeader({ nonce, isDev: false });
+    expect(extractNonce(header)).toBe(nonce);
+  });
+
+  it("returns null on the dev CSP (no nonce directive — F-7 escape hatch)", () => {
+    const header = buildCspHeader({ isDev: true });
+    expect(extractNonce(header)).toBeNull();
+  });
+
+  it("returns null on the nonceless production fallback (script-src 'self')", () => {
+    const header = buildCspHeader({ isDev: false });
+    expect(extractNonce(header)).toBeNull();
+  });
+
+  it("returns null on empty or garbage headers (attribute omitted, never a junk nonce)", () => {
+    expect(extractNonce("")).toBeNull();
+    expect(extractNonce("not a csp header at all")).toBeNull();
+    expect(extractNonce("default-src 'self'; script-src 'nonce-'")).toBeNull();
   });
 });

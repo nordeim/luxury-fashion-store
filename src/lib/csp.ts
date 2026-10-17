@@ -55,3 +55,21 @@ export function mintNonce(): string {
   for (const b of bytes) binary += String.fromCharCode(b);
   return btoa(binary);
 }
+
+// F-N (session-25): the nonce source step for hand-rendered data blocks.
+// Next stamps its nonce on the scripts IT controls (bootstrap + RSC
+// payload); a hand-rendered `<script type="application/ld+json">` is served
+// nonceless (wire-verified), so the home page extracts the nonce from the
+// request's CSP header — which src/proxy.ts sets on BOTH directions — and
+// carries it on the data block. A data block is CSP-exempt regardless (the
+// HTML spec does not execute it); carrying the nonce keeps the
+// security-csp gate's served-bytes per-tag assertion literally true on `/`
+// without touching that gate.
+const NONCE_IN_HEADER = /'nonce-([A-Za-z0-9+/_-]+={0,2})'/;
+
+/** Extract the nonce value from a CSP header string; null when absent. */
+export function extractNonce(cspHeader: string): string | null {
+  const match = NONCE_IN_HEADER.exec(cspHeader);
+  // An empty extraction is junk (e.g. a bare 'nonce-') — omit the attribute.
+  return match && match[1] ? match[1] : null;
+}

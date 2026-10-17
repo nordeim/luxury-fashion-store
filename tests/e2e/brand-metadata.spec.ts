@@ -19,11 +19,24 @@
 // 4. F-M — the font cache: the twelve immutable woff2 binaries ship
 //    `Cache-Control: public, max-age=31536000, immutable` instead of
 //    `max-age=0` (re-downloaded on every visit).
+//
+// Session-25 extension (F-N / F-O / F-P / F-Q — the store-root identity +
+// first-paint transport catch-up):
+//
+// 5. F-N — the home head carries the WebSite + Organization JSON-LD the
+//    reference itself ships (measured 2026-10-17) and BOTH data blocks carry
+//    the request nonce in the served bytes (the security-csp gate's per-tag
+//    assertion runs on `/`; Next stamps only scripts it controls).
+// 6. F-O — the first-paint font preloads ship with crossorigin (the @font-face
+//    fetch is CORS-mode; a preload without it double-downloads).
+// 7. F-P — the browser-chrome tint (theme-color) is the measured paper the
+//    manifest pins.
+// 8. F-Q — the RFC 9116 security-contact file serves with the real channel.
 import { expect, test } from "@playwright/test";
 
 const PDP_PATH = "/product/silk-draped-evening-gown"; // the L-2 seed-contract slug
 
-test.describe("brand metadata assets (F-K / F-K2 / F-L / F-M)", () => {
+test.describe("brand metadata assets (F-K / F-K2 / F-L / F-M / F-N / F-O / F-P / F-Q)", () => {
   test("the swan mark serves over the wire and the home head carries the icon links", async ({
     page,
     request,
@@ -105,5 +118,103 @@ test.describe("brand metadata assets (F-K / F-K2 / F-L / F-M)", () => {
     const res = await request.get("/fonts/cormorant-garamond-300.woff2");
     expect(res.status()).toBe(200);
     expect(res.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+  });
+
+  // F-N (session-25): the store-root identity graphs the reference itself
+  // ships — read from the SERVED BYTES (data blocks' content lives in the
+  // HTML; the DOM hides nothing here, but the nonce does — browsers move it
+  // to an internal slot, trap #33's discipline applies to assertions too).
+  test("the home head carries the WebSite + Organization JSON-LD with the request nonce", async ({
+    page,
+  }) => {
+    const response = await page.goto("/");
+    const html = (await response?.text()) ?? "";
+    // Isolate the script-src DIRECTIVE before splitting (the raw header's
+    // nonce token carries the next directive's trailing ';' — the
+    // security-csp gate's scriptSrcOf discipline).
+    const scriptSrc =
+      (response?.headers()["content-security-policy"] ?? "")
+        .split(";")
+        .map((d) => d.trim())
+        .find((d) => d.startsWith("script-src")) ?? "";
+    const nonce = scriptSrc
+      .split(" ")
+      .find((s) => s.startsWith("'nonce-"))
+      ?.slice(7, -1);
+    expect(nonce, "header nonce extracted").toBeTruthy();
+
+    const blocks = Array.from(
+      html.matchAll(/<script type="application\/ld\+json"[^>]*>(.*?)<\/script>/g)
+    ).map((m) => JSON.parse(m[1]) as Record<string, unknown>);
+    expect(blocks).toHaveLength(2);
+
+    // Reference-measured shapes (2026-10-17): WebSite {name,url} then
+    // Organization {name,logo,url} — the logo is the clone's OWN mark.
+    expect(blocks[0]).toEqual({
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: "AURELIA",
+      url: "http://localhost:3000",
+    });
+    expect(blocks[1]).toEqual({
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      name: "AURELIA",
+      logo: "http://localhost:3000/icons/icon-512.png",
+      url: "http://localhost:3000",
+    });
+
+    // Both data blocks carry the exact request nonce in the served bytes.
+    const ldTags = Array.from(
+      html.matchAll(/<script type="application\/ld\+json"[^>]*>/g)
+    ).map((m) => m[0]);
+    expect(ldTags).toHaveLength(2);
+    for (const tag of ldTags) {
+      expect(tag, `data block lacks the nonce: ${tag}`).toContain(`nonce="${nonce}"`);
+    }
+  });
+
+  // F-O (session-25): the first-paint preloads — three files, the measured
+  // weight set, each with crossorigin (a preload without it double-fetches).
+  test("the first-paint font preloads ship with crossorigin", async ({ page }) => {
+    await page.goto("/");
+    const preloads = page.locator('link[rel="preload"][as="font"]');
+    await expect(preloads).toHaveCount(3);
+    const hrefs = await preloads.evaluateAll((els) =>
+      els.map((el) => el.getAttribute("href"))
+    );
+    expect(hrefs).toEqual([
+      "/fonts/cormorant-garamond-300.woff2",
+      "/fonts/montserrat-300.woff2",
+      "/fonts/montserrat-400.woff2",
+    ]);
+    const crossings = await preloads.evaluateAll((els) =>
+      els.map((el) => el.getAttribute("crossorigin"))
+    );
+    for (const c of crossings) expect(c, "every font preload sets crossorigin").not.toBeNull();
+  });
+
+  // F-P (session-25): the browser-chrome tint — the measured paper the
+  // manifest's theme_color already pins.
+  test("the browser chrome tints to the measured paper (theme-color)", async ({ page }) => {
+    await page.goto("/");
+    const meta = page.locator('meta[name="theme-color"]');
+    await expect(meta).toHaveCount(1);
+    await expect(meta).toHaveAttribute("content", "#F8F7F6");
+  });
+
+  // F-Q (session-25): the RFC 9116 security-contact file — the production
+  // hygiene surface, served from the static bundle.
+  test("the RFC 9116 security.txt serves with the real contact channel", async ({
+    request,
+  }) => {
+    const res = await request.get("/.well-known/security.txt");
+    expect(res.status()).toBe(200);
+    expect(res.headers()["content-type"]).toContain("text/plain");
+    const body = await res.text();
+    expect(body).toContain(
+      "Contact: https://github.com/nordeim/luxury-fashion-store/security/advisories/new"
+    );
+    expect(body).toMatch(/^Expires: \d{4}-\d{2}-\d{2}T/m);
   });
 });
