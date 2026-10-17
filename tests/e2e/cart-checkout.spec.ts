@@ -413,3 +413,76 @@ test.describe("sold-out adjust guard (customer session)", () => {
     await expect(page.getByText("Your bag is empty")).toBeVisible();
   });
 });
+
+// Owner capability rows of the success gate (session-35, F-FF).
+//
+// The F-CC matrix above pins the GUEST half of the /checkout/success
+// capability gate (logged-out contexts only). The OWNER half — the gate's
+// first term — was never DIRECTLY exercised: the placement cases reach the
+// success page only as the redirect target, so a dropped `isOwner` term
+// would lock every signed-in customer out of their own confirmations (and
+// an over-broad one would serve guest orders to any session) with every
+// gate green. The gate (src/app/(storefront)/checkout/success/page.tsx):
+//   isOwner          = user && order.userId === user.id
+//   isGuestWithToken = !order.userId && token && verifyOrderViewToken(...)
+//   if (!isOwner && !isGuestWithToken) notFound();
+//
+// Row census (session-35): guest+valid token → 200 and the absent/wrong/
+// cross/unknown token 404s are F-CC's (logged-out). THIS describe pins the
+// three session-bearing rows: owner+own order+NO token → 200 (the DIRECT
+// owner capability, with the PII it protects); signed-in+guest order+NO
+// token → 404 with no existence leak (the mismatch half via
+// `order.userId === null !== user.id`); signed-in+guest order+its own VALID
+// offline token → 200 (the token path is session-ORTHOGONAL — a gate
+// "tightened" to require logged-out would silently break shared
+// confirmation links). The foreign-owner row (a different non-null userId)
+// stays covered-by-shape: `===` has no null special-case, and the
+// null-mismatch row already exercises its false branch.
+//
+// Budget + H-24: the case rides james's per-project storageState — ZERO
+// logins, zero limiter consumption (james's and admin's buckets stay
+// exactly consumed, SKILL §9 #23); every fetch is a read-only GET on
+// canonical seed rows (ORD-2026-001 james / ORD-2026-004 the canonical
+// guest order) — nothing to clean (global-setup re-seeds orders every run).
+test.describe("owner capability rows of the success gate (F-FF, session-35)", () => {
+  // The default storageState IS james's (the setup projects' canonical
+  // session) — no test.use here is deliberate: the rows under test are the
+  // SESSION-bearing half of the gate.
+
+  function orderViewTokenOffline(orderNumber: string): string {
+    return createHmac("sha256", E2E_AUTH_SECRET).update(`order-view:${orderNumber}`).digest("hex").slice(0, 40);
+  }
+
+  test("a signed-in owner reaches their confirmation without a token, and only it (F-FF)", async ({ page }) => {
+    // ROW 1 — the direct owner capability: james + his canonical order +
+    // NO token → 200 with the PII the gate protects for the rightful owner.
+    const own = await page.goto("/checkout/success?order=ORD-2026-001");
+    expect(own?.status(), "row 1: status").toBe(200);
+    await expect(page.getByText("ORD-2026-001"), "row 1: the order number").toBeVisible();
+    await expect(page.getByText("james@example.com"), "row 1: the owner's email").toBeVisible();
+
+    // ROW 2 — signed-in is not a capability on a GUEST order: the mismatch
+    // half (order.userId === null !== user.id) must 404 with no leak.
+    const guestNoToken = await page.goto("/checkout/success?order=ORD-2026-004");
+    expect(guestNoToken?.status(), "row 2: status").toBe(404);
+    await expect(page.getByText("Page Not Found"), "row 2: not-found card").toBeVisible();
+    const body = await page.content();
+    expect(body, "row 2: no guest-email leak").not.toContain("guest.visitor@example.com");
+
+    // ROW 3 — the token path is session-orthogonal: the SAME signed-in
+    // session holding the guest order's own VALID token serves it (the
+    // shared-confirmation-link affordance the source declares).
+    const guestWithToken = await page.goto(
+      `/checkout/success?order=ORD-2026-004&t=${orderViewTokenOffline("ORD-2026-004")}`,
+    );
+    expect(guestWithToken?.status(), "row 3: status").toBe(200);
+    await expect(page.getByText("guest.visitor@example.com"), "row 3: the token holder's PII").toBeVisible();
+
+    // ROW 3b — the cross-order negative holds under a session too.
+    const cross = await page.goto(
+      `/checkout/success?order=ORD-2026-004&t=${orderViewTokenOffline("ORD-2099-002")}`,
+    );
+    expect(cross?.status(), "row 3b: status").toBe(404);
+    await expect(page.getByText("Page Not Found"), "row 3b: not-found card").toBeVisible();
+  });
+});
