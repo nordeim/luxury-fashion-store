@@ -57,6 +57,15 @@
 //     og:url from the PDP head (served-bytes verified — every other page
 //     carries them). The re-declared fields pin here so the drift cannot
 //     recur.
+//
+// Session-28 extension (F-X — the referenced targets finally fetched):
+//
+// 13. F-X — the manifest case asserts the icon SRC strings and the F-N case
+//     asserts the Organization logo URL, but no case ever FETCHED the files:
+//     a renamed/deleted `public/icons/*.png` would 404 the PWA install and
+//     the identity graph's logo while every gate stays green. The F-H2
+//     lesson's sibling — assert the referenced TARGETS, not just the
+//     reference. Expectations derive from the served artifacts themselves.
 import { expect, test } from "@playwright/test";
 
 const PDP_PATH = "/product/silk-draped-evening-gown"; // the L-2 seed-contract slug
@@ -266,6 +275,59 @@ test.describe("brand metadata assets (F-K / F-K2 / F-L / F-M / F-N / F-O / F-P /
     expect(html).toContain(
       '<meta property="og:url" content="http://localhost:3000"/>'
     );
+  });
+
+  // F-X (session-28): every REFERENCED brand asset serves — the contract the
+  // string pins stopped one hop short of. The icon/logo expectations are
+  // derived from the SERVED manifest + SERVED home JSON-LD (no duplicated
+  // literals to drift); the fetch list is exactly the referenced set plus
+  // the two file-convention head surfaces (apple icon, share card).
+  test("every referenced brand asset serves over the wire", async ({
+    request,
+  }) => {
+    // The manifest body is the source of the icon contract.
+    const manifestRes = await request.get("/manifest.webmanifest");
+    expect(manifestRes.status()).toBe(200);
+    const manifest = (await manifestRes.json()) as {
+      icons: Array<{ src: string; type: string }>;
+    };
+    expect(manifest.icons.length).toBeGreaterThan(0);
+
+    // The home JSON-LD is the source of the Organization logo contract.
+    const homeRes = await request.get("/");
+    expect(homeRes.status()).toBe(200);
+    const homeHtml = await homeRes.text();
+    const blocks = Array.from(
+      homeHtml.matchAll(
+        /<script type="application\/ld\+json"[^>]*>(.*?)<\/script>/g
+      )
+    ).map((m) => JSON.parse(m[1]) as Record<string, unknown>);
+    const org = blocks.find((b) => b["@type"] === "Organization") as
+      | { logo: string }
+      | undefined;
+    expect(org, "home carries the Organization graph").toBeTruthy();
+    expect(org!.logo, "Organization logo is an absolute URL").toMatch(
+      /^https?:\/\//
+    );
+
+    // The referenced set + the file-convention head surfaces.
+    const assets: Array<[string, string]> = [
+      ...manifest.icons.map((i) => [i.src, i.type] as [string, string]),
+      [org!.logo.replace(/^https?:\/\/[^/]+/, ""), "image/png"],
+      ["/apple-icon.png", "image/png"],
+      ["/opengraph-image.png", "image/png"],
+    ];
+    for (const [src, type] of assets) {
+      const res = await request.get(src);
+      expect(res.status(), `GET ${src}`).toBe(200);
+      expect(
+        res.headers()["content-type"],
+        `${src} content-type`
+      ).toContain(type);
+      expect((await res.body()).length, `${src} nonzero body`).toBeGreaterThan(
+        100
+      );
+    }
   });
 });
 
