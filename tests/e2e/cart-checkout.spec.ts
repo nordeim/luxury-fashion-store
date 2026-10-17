@@ -5,10 +5,30 @@
 // demo user, so the user cart may already hold lines from earlier specs.
 // Every assertion here is written against DELTAS or UI-visible reality —
 // never absolute counts.
+//
+// Session-32 extension (F-CC — the guest order-view capability gate):
+// the confirmation URL's ?order=&t= pair is the declared capability contract
+// (CLAUDE.md: "Guest order confirmations ride an HMAC view token —
+// sequential order numbers are not capability tokens") — unit-pinned at the
+// pure layer (order-token.test.ts) yet never exercised on the wire: the
+// checkout cases below REACH /checkout/success by following the placement
+// redirect and never assert the GATE. The F-CC describe drives the real
+// guest COD flow in a fresh logged-out context, captures the minted
+// order+token pair, then direct-fetches the full capability matrix: the
+// captured pair serves (with the PII it protects), and every rejected
+// variant — absent token, wrong token, a VALID token minted for a DIFFERENT
+// order (computed offline with the shared E2E_AUTH_SECRET, the
+// e2e-secrets.ts single-source-of-truth constant), and an unknown order with
+// its own valid token — 404s into the platform not-found card, leaking no
+// guest email. Rate-limit budget: checkout is 10/10min per IP (one shared
+// bucket); this suite spends 2/project (COD + card) + 1/project (F-CC)
+// = 6 < 10 per run.
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { writeFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { E2E_AUTH_SECRET } from "./e2e-secrets";
 
 async function openDrawerWithItem(page: import("@playwright/test").Page) {
   // PDP CTA: always visible (the card-grid action row is hover-revealed).
@@ -270,6 +290,85 @@ test.describe("guest cart merge at login", () => {
 // line on every click. The plan-driven executor must refuse growth on a
 // sold-out line (H-15: leave the line untouched; the checkout guard owns the
 // conversation).
+// F-CC (session-32): the confirmation route's capability gate, exercised on
+// the wire against a REAL placed guest order — the shape the placement
+// redirect alone can never prove.
+test.describe("guest order-view capability gate (F-CC, session-32)", () => {
+  // A fresh logged-out context (the F-BB storageState opt-out): the flow must
+  // mint a GUEST order (userId: null) deterministically, whatever run order
+  // the suite gave earlier specs.
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  // The declared shape (src/lib/order-token.ts): HMAC-SHA256 over
+  // `order-view:${orderNumber}`, hex, first 40 chars — with the standalone's
+  // AUTH_SECRET (= E2E_AUTH_SECRET, injected by playwright.config webServer
+  // env). Computing a token OFFLINE for a different order number lets the
+  // matrix reject a VALID token for the WRONG order without placing a second
+  // order (one checkout-bucket slot saved, one wizard round-trip saved).
+  function orderViewTokenOffline(orderNumber: string): string {
+    return createHmac("sha256", E2E_AUTH_SECRET).update(`order-view:${orderNumber}`).digest("hex").slice(0, 40);
+  }
+
+  test("the guest confirmation serves only with the minted view token (F-CC)", async ({ page }) => {
+    test.setTimeout(90_000);
+
+    // The proven COD flow (the "cart + checkout" describe above): PDP
+    // preselects sizes[0], one click fills the drawer; wizard Shipping →
+    // Payment(COD) → Review → Place.
+    await page.goto("/product/silk-draped-evening-gown");
+    await page.locator("main").getByRole("button", { name: "Add to Bag" }).first().click();
+    await expect(page.getByTestId("cart-drawer")).toBeVisible();
+    await page.goto("/checkout");
+
+    const GUEST_EMAIL = "james@example.com";
+    await page.getByLabel("Email", { exact: true }).fill(GUEST_EMAIL);
+    await page.getByLabel("Full Name").fill("James Whitmore");
+    await page.getByLabel("Street Address").fill("212 Mercer Street, Apt 4B");
+    await page.getByLabel("City").fill("New York");
+    await page.getByLabel("State").fill("NY");
+    await page.getByLabel("ZIP").fill("10012");
+    await page.getByRole("button", { name: "Continue to Payment" }).click();
+    await page.getByText("Cash on Delivery").click();
+    await page.getByRole("button", { name: "Review Order" }).click();
+    await page.getByRole("button", { name: /place order/i }).click();
+
+    await expect(page).toHaveURL(/\/checkout\/success/, { timeout: 20_000 });
+    const successUrl = new URL(page.url());
+    const order = successUrl.searchParams.get("order") || "";
+    const token = successUrl.searchParams.get("t") || "";
+
+    // The minted capability pair rides the redirect — the declared shapes.
+    expect(order).toMatch(/^ORD-\d{4}-\d{3}$/);
+    expect(token).toMatch(/^[0-9a-f]{40}$/);
+
+    // Positive path — the captured pair serves the confirmation (direct
+    // fetch, not the redirect-followed landing the existing cases prove).
+    const ok = await page.goto(`/checkout/success?order=${order}&t=${token}`);
+    expect(ok?.status()).toBe(200);
+    await expect(page.getByText(new RegExp(order.replace("-", "\\-")))).toBeVisible();
+    // The PII the gate exists to protect — on the served body for the
+    // rightful token holder.
+    await expect(page.getByText(GUEST_EMAIL)).toBeVisible();
+
+    // The negative matrix — every rejected variant 404s into the platform
+    // not-found card, leaking no guest email ("no existence leak", the
+    // source's own contract comment).
+    const matrix: Array<[string, string]> = [
+      ["absent token", `/checkout/success?order=${order}`],
+      ["wrong token", `/checkout/success?order=${order}&t=${(token[0] === "0" ? "1" : "0") + token.slice(1)}`],
+      ["cross-order token", `/checkout/success?order=${order}&t=${orderViewTokenOffline("ORD-2099-002")}`],
+      ["unknown order + its own valid token", `/checkout/success?order=ORD-2099-001&t=${orderViewTokenOffline("ORD-2099-001")}`],
+    ];
+    for (const [label, url] of matrix) {
+      const res = await page.goto(url);
+      expect(res?.status(), `${label}: status`).toBe(404);
+      await expect(page.getByText("Page Not Found"), `${label}: not-found card`).toBeVisible();
+      const body = await page.content();
+      expect(body, `${label}: no PII leak`).not.toContain(GUEST_EMAIL);
+    }
+  });
+});
+
 test.describe("sold-out adjust guard (customer session)", () => {
   // Runs on the canonical JAMES session — no login of its own. The admin
   // seam's in-spec logins already consume exactly the rate limiter's 10 per
