@@ -13,6 +13,22 @@
  * JSON-LD data block (exempt from script-src by the HTML spec) — asserted
  * present, parseable, and carrying the seeded price.
  *
+ * Session-30 extension (F-AA — the static transport headers):
+ *
+ * F-AA: next.config.ts `async headers()` ships SIX security headers on
+ * `/:path*` (Referrer-Policy, X-Content-Type-Options, Strict-Transport-
+ * Security, X-Frame-Options, Permissions-Policy, Cross-Origin-Opener-Policy)
+ * and both AGENTS.md and README declare them in prose — yet no gate ever
+ * asserted them over the wire (the F-Y family: a declared contract the
+ * gates never exercise; a typo'd key would silently strip e.g.
+ * X-Frame-Options: DENY from every response with every gate green). The
+ * new describe pins all six EXACT values on three route classes (document
+ * root, deep PDP route, API route) — assumptions wire-verified first-hand
+ * by scripts/plan-probe-session30.cjs (21/21) BEFORE the spec was written.
+ * The CSP is deliberately NOT pinned here as a static header — it is minted
+ * per-request by src/proxy.ts (the cases above) and a static one would
+ * defeat the nonce.
+ *
  * These tests run against the production standalone (NODE_ENV=production —
  * the webServer env), so the dev escape hatch (unsafe-inline + unsafe-eval)
  * must NOT appear.
@@ -123,4 +139,40 @@ test.describe("security CSP + structured data (N-1/F-B)", () => {
     expect(ld.offers.priceCurrency).toBe("USD");
     expect(ld.offers.availability).toBe("https://schema.org/InStock");
   });
+});
+
+// F-AA (session-30): the static transport-header contract — next.config.ts
+// `async headers()` on `/:path*`, declared in AGENTS.md/README, now pinned
+// over the wire. EXACT-value assertions (=== the declaration, not
+// substring): a value drift fails the gate, not just a dropped key. One
+// case per route class keeps failures surgical (a dropped header fails all
+// three; a route-scoped regression fails exactly one). All values
+// wire-verified by scripts/plan-probe-session30.cjs before pinning.
+const TRANSPORT_HEADERS: Record<string, string> = {
+  "referrer-policy": "strict-origin-when-cross-origin",
+  "x-content-type-options": "nosniff",
+  "strict-transport-security": "max-age=31536000",
+  "x-frame-options": "DENY",
+  "permissions-policy":
+    "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+  "cross-origin-opener-policy": "same-origin",
+};
+
+test.describe("static transport headers (F-AA, session-30)", () => {
+  for (const [route, label] of [
+    ["/", "the document root"],
+    [SEEDED_GOWN, "the deep PDP route"],
+    ["/api/health", "the API route class"],
+  ] as const) {
+    test(`the six declared transport headers serve exact values on ${label}`, async ({
+      request,
+    }) => {
+      const res = await request.get(route);
+      expect(res.status(), `GET ${route}`).toBe(200);
+      const headers = res.headers();
+      for (const [name, want] of Object.entries(TRANSPORT_HEADERS)) {
+        expect(headers[name], `${route} :: ${name}`).toBe(want);
+      }
+    });
+  }
 });
