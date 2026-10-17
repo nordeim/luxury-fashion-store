@@ -66,6 +66,15 @@
 //     the identity graph's logo while every gate stays green. The F-H2
 //     lesson's sibling — assert the referenced TARGETS, not just the
 //     reference. Expectations derive from the served artifacts themselves.
+//
+// Session-29 extension (F-Z — the preload pin's referenced targets):
+//
+// 14. F-Z — the F-O preload case asserts three href STRINGS and the F-M case
+//     fetches exactly ONE font file; the other two referenced targets were
+//     never fetched (a renamed `public/fonts/montserrat-*.woff2` would 404
+//     the first-paint preload with every gate green). The new case derives
+//     its fetch list from the SERVED DOM's preload set and fetches every
+//     target (200 + font/woff2 + nonzero body).
 import { expect, test } from "@playwright/test";
 
 const PDP_PATH = "/product/silk-draped-evening-gown"; // the L-2 seed-contract slug
@@ -226,6 +235,37 @@ test.describe("brand metadata assets (F-K / F-K2 / F-L / F-M / F-N / F-O / F-P /
       els.map((el) => el.getAttribute("crossorigin"))
     );
     for (const c of crossings) expect(c, "every font preload sets crossorigin").not.toBeNull();
+  });
+
+  // F-Z (session-29): the F-O pin's missing hop — the preload case asserts
+  // the href STRINGS and the F-M case fetches exactly ONE font file; the
+  // other two referenced targets were never fetched. A renamed/deleted
+  // public/fonts/montserrat-*.woff2 would 404 the first-paint preload while
+  // every gate stays green. The F-X lesson one layer down — assert the
+  // referenced TARGETS, not just the reference. Expectations derive from the
+  // SERVED DOM's preload set (no duplicated literals).
+  test("every first-paint preload target serves over the wire", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/");
+    const hrefs = await page
+      .locator('link[rel="preload"][as="font"]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute("href")));
+    expect(hrefs.length).toBeGreaterThan(0);
+    for (const href of hrefs) {
+      expect(href, "preload href is a root-relative path").toMatch(/^\//);
+      const res = await request.get(href as string);
+      expect(res.status(), `GET ${href}`).toBe(200);
+      expect(
+        res.headers()["content-type"],
+        `${href} content-type`
+      ).toContain("font/woff2");
+      expect(
+        (await res.body()).length,
+        `${href} nonzero body`
+      ).toBeGreaterThan(100);
+    }
   });
 
   // F-P (session-25): the browser-chrome tint — the measured paper the
