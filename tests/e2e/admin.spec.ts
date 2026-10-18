@@ -440,3 +440,175 @@ test.describe("admin event-write path (F-HH, session-37)", () => {
     }
   });
 });
+
+// Low-stock KPI read gate (session-41, F-LL).
+//
+// The dashboard's Low Stock KPI reads the G-3 (session-4) dedicated COUNT —
+// db.product.count({ where: { isActive: true, stock: { lte: 3 } } }) at
+// src/app/(storefront)/admin/page.tsx:26 — whose own comment documents the
+// F-21 under-count class ("lowStock.length would silently under-count"),
+// and the alert panel below (:70-77) renders the low-stock names with the
+// "3 or fewer remaining." copy. The canonical seed ships ALL 12 products at
+// stock=12, so the surface renders its EMPTY state (KPI "0", panel hidden)
+// on every run — and NO assertion anywhere reads either: the dashboard case
+// above pins Products=12, Revenue floor, Orders floor (never Low Stock);
+// the a11y spec renders the dashboard for axe violations only; the sibling
+// H-2 seam (the take-cap class on the ORDERS table) got its injection gate
+// in session-5 — G-3 never did. Every mutation of this read leaves every
+// gate green: the count swapped for the take-capped list length (reads 20
+// once 21 products sit at the threshold — the comment's own documented
+// regression), the isActive filter dropped (the inactive sentinel counts),
+// the threshold drifted (lt: 3 → 0, lte: 4 → over-count), the whole count
+// dropped and hardcoded (0).
+//
+// ZERO logins: the admin session is minted OFFLINE (the F-HH/a11y M-1
+// pattern) — the exactly-consumed admin bucket (SKILL §9 #23) stays
+// untouched. The fixture: 21 active pins at stock=3 (the boundary value on
+// the counted side — 21 > the panel list's take(20) forces the
+// count-vs-length divergence the dedicated COUNT defends), one INACTIVE
+// sentinel at stock=3 (the isActive-filter half), one active sentinel at
+// stock=4 (the boundary+1 half). Cleanup in afterAll by slug prefix — the
+// ONLY cleanup path: global-setup does NOT wipe Product (H-22/H-25 covers
+// orders/carts/wishlists/sessions, not products).
+test.describe("low-stock KPI read (F-LL, session-41)", () => {
+  const ADMIN_TOKEN = randomBytes(32).toString("hex");
+  const SESSION_COOKIE = `${ADMIN_TOKEN}.${createHmac("sha256", E2E_AUTH_SECRET)
+    .update(ADMIN_TOKEN)
+    .digest("base64url")}`;
+  const PREFIX = "f-ll-";
+  const PIN_COUNT = 21;
+
+  test.use({
+    storageState: {
+      cookies: [
+        {
+          name: "aurelia_session",
+          value: SESSION_COOKIE,
+          domain: "localhost",
+          path: "/",
+          httpOnly: true,
+          secure: false, // http://localhost — matches the setup projects' minted cookies
+          sameSite: "Lax" as const,
+          expires: Math.floor(Date.now() / 1000) + 86_400,
+        },
+      ],
+      origins: [],
+    },
+  });
+
+  const REPO = process.cwd();
+  const SCHEMA = path.join(REPO, "prisma", "schema.prisma");
+  const E2E_DB_URL = `file:${path.join(REPO, "db", "e2e.db")}`;
+  const SQL_SCRATCH = path.join(REPO, "tests", "e2e", ".f-ll-kpi.sql");
+
+  /** Read rows through Prisma on the E2E DB (the F-HH helper's shape). */
+  function dbRead(jsonExpression: string): string {
+    const script = `const {PrismaClient}=require("@prisma/client");const p=new PrismaClient({datasources:{db:{url:"${E2E_DB_URL}"}}});(${jsonExpression})(p).then(r=>{console.log("<<JSON>>"+JSON.stringify(r));return p.$disconnect()}).catch(e=>{console.error(e.message);process.exit(1)})`;
+    const res = spawnSync("node", ["-e", script], {
+      cwd: REPO,
+      env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    if (res.status !== 0) throw new Error(`dbRead failed: ${res.stderr?.slice(0, 300)}`);
+    const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+    if (marker < 0) throw new Error(`dbRead produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+    return res.stdout.slice(marker + "<<JSON>>".length).trim();
+  }
+
+  /** SQL fixture helper — the established `prisma db execute` pattern (H-2/M-1). */
+  function sqlRun(sql: string): void {
+    writeFileSync(SQL_SCRATCH, sql);
+    try {
+      const res = spawnSync(
+        "npx",
+        ["prisma", "db", "execute", "--schema", SCHEMA, "--file", SQL_SCRATCH],
+        {
+          cwd: REPO,
+          env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+        },
+      );
+      if (res.status !== 0) throw new Error(`sqlRun failed: ${res.stderr?.slice(0, 300)}`);
+    } finally {
+      try { unlinkSync(SQL_SCRATCH); } catch { /* already gone */ }
+    }
+  }
+
+  /** The fixture rows: N active pins (stock=3, the counted boundary) + the
+   * inactive sentinel (stock=3, must NOT count) + the threshold sentinel
+   * (stock=4, must NOT count). The categoryId resolves by scalar subquery —
+   * never hardcoded; updatedAt passed explicitly (@updatedAt has no DB
+   * default — the H-2 insert's discipline). */
+  const fixtureSql = () => {
+    const row = (slug: string, name: string, stock: number, isActive: boolean, sortOrder: number) =>
+      `INSERT INTO "Product" ("id","slug","name","brand","description","price","categoryId","subcategory","sortOrder","stock","isActive","createdAt","updatedAt") ` +
+      `VALUES ('${slug}','${slug}','${name}','E2E','F-LL fixture row',100,` +
+      `(SELECT "id" FROM "Category" WHERE "slug"='accessories' LIMIT 1),'hats',${sortOrder},${stock},${isActive ? 1 : 0},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);`;
+    return [
+      `DELETE FROM "Product" WHERE "slug" LIKE '${PREFIX}%';`,
+      ...Array.from({ length: PIN_COUNT }, (_, i) =>
+        row(`${PREFIX}pin-${String(i + 1).padStart(2, "0")}`, `F-LL Pin ${String(i + 1).padStart(2, "0")}`, 3, true, 1001 + i)),
+      row(`${PREFIX}inactive-sentinel`, "F-LL Inactive Sentinel", 3, false, 1101),
+      row(`${PREFIX}threshold-sentinel`, "F-LL Threshold Sentinel", 4, true, 1102),
+    ].join("\n");
+  };
+
+  test.beforeAll(() => {
+    // The offline admin mint (INSERT…SELECT resolves the admin's id in the
+    // DB itself — never hardcoded; idempotent delete-then-insert; the row
+    // dies in afterAll AND at every global-setup wipe).
+    sqlRun(
+      `DELETE FROM "Session" WHERE token = '${ADMIN_TOKEN}';\n` +
+        `INSERT INTO "Session" (id, token, "userId", "expiresAt", "createdAt") ` +
+        `SELECT 'fll-admin-' || '${ADMIN_TOKEN.slice(0, 16)}', '${ADMIN_TOKEN}', id, datetime('now', '+1 day'), datetime('now') ` +
+        `FROM "User" WHERE email = 'admin@aurelia.com';`,
+    );
+    sqlRun(fixtureSql());
+  });
+
+  test.afterAll(() => {
+    // Product is NOT in global-setup's wipe list — this DELETE is the
+    // fixture's ONLY cleanup path (runs even on mid-case failure).
+    sqlRun(
+      `DELETE FROM "Product" WHERE "slug" LIKE '${PREFIX}%';\n` +
+        `DELETE FROM "Session" WHERE token = '${ADMIN_TOKEN}';`,
+    );
+  });
+
+  test("the Low Stock KPI reads the true count, not the take-capped list (F-LL)", async ({ page }) => {
+    test.setTimeout(45_000);
+
+    // SUPPORTING — the fixture's own truth (server side, before any render).
+    const fixtureRows = Number(dbRead(`(p)=>p.product.count({where:{slug:{startsWith:"${PREFIX}"}}})`));
+    expect(fixtureRows, "the fixture landed: 21 pins + 2 sentinels").toBe(23);
+
+    // The real surface on the offline-minted admin session (no login call).
+    // The mint's wire validity: the role gate lets the dashboard render.
+    await page.goto("/admin");
+    await expect(page).toHaveURL(/\/admin/);
+    await expect(page.getByRole("heading", { name: /Admin/i })).toBeVisible();
+
+    // LOAD-BEARING — the KPI reads the TRUE COUNT of active products at
+    // stock <= 3: exactly the 21 pins. Catches every mutation shape: the
+    // count swapped for lowStock.length (the take-20-capped list reads 20),
+    // the isActive filter dropped (the inactive sentinel counts → 22), the
+    // threshold drifted (lt: 3 → 0; lte: 4 → 22), the whole read dropped
+    // (0). The existing dashboard case's KPI pins never read Low Stock —
+    // this is the only assertion in the suite that does.
+    const kpiCard = page.getByText("Low Stock", { exact: true }).locator("..");
+    await expect(kpiCard).toBeVisible();
+    const kpiText = (await kpiCard.textContent()) ?? "";
+    const kpi = Number(kpiText.replace(/\D+/g, ""));
+    expect(kpi, "the Low Stock KPI is the true COUNT (21 pins), not the list length (20), not unfiltered (22)").toBe(21);
+
+    // SUPPORTING — the alert panel's read-through render: the threshold
+    // copy + the sortOrder-first pin's name. (The panel's own take(20) cap
+    // is deliberately NOT pinned — the KPI's true COUNT is the contract.)
+    const panel = page.getByText("Low stock alert");
+    await expect(panel).toBeVisible();
+    await expect(panel.locator("..")).toContainText("3 or fewer remaining");
+    await expect(panel.locator("..")).toContainText("F-LL Pin 01");
+  });
+});
