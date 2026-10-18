@@ -578,3 +578,152 @@ test.describe("logout row revocation (F-KK, session-40)", () => {
     expect(sessionCookie, "the aurelia_session cookie is cleared").toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// F-NN (session-43) — the expired-session denial: the TTL revoke half of the
+// ADR-006 session denylist. The denylist's three revoke halves: logout
+// (F-KK gated), rotation (F-II gated) — and TTL EXPIRY, gated by NOTHING
+// before this round. getCurrentUser (src/lib/auth.ts:132-135) is the
+// read-time enforcement: an expired-but-present session row must (1) NOT
+// authenticate its bearer (the expiry check — a dropped check opens a
+// zombie-auth window up to the next hourly sweep on a long-running server;
+// the stolen-cookie threat model F-KK documents) and (2) be PRUNED by the
+// read itself (the :133 inline delete — a dropped prune leaves dead rows
+// lingering while every wire-level assertion stays green; the sweeper's own
+// comment documents the contract: "the auth layer also deletes lazily on
+// presentation").
+//
+// Wire-blindness (first-hand census, this session): ALL five offline-mint
+// sites in the suite mint FUTURE expiry (F-II's hijack + resurrect, F-KK,
+// F-HH admin, the a11y M-1 axe gate — every one `datetime('now', '+1
+// day')`); every login-minted session is +30d (SESSION_TTL_DAYS); the
+// sweeper unit test pins the PLAN shape only, never the runtime seam. A
+// dropped check leaves every existing gate green while the expired cookie
+// keeps authenticating through the window.
+//
+// ZERO logins, ZERO registers, ZERO limiter consumption (the F-KK shape):
+// the session under test is minted OFFLINE — a random 256-bit token, the
+// cookie signed token.hmac with the shared E2E_AUTH_SECRET, the row
+// inserted via `prisma db execute` with james's id resolved by the DB
+// itself. The describe's storageState carries ONLY the minted cookie (the
+// browser-cookie expiry is FUTURE +1d — the browser must CARRY the cookie;
+// the ROW's expiry is the seam under test: PAST, -1d). The mint is exactly
+// the no-register/no-login shape the session-39 plan §8 #16 prefers.
+//
+// Cleanup discipline (H-24): the afterAll belt-and-braces DELETE is a
+// no-op on a healthy prune (probe check 5) and runs even on mid-case
+// failure; global-setup wipes the Session table wholesale at every run
+// start anyway (H-22/H-25). The sweeper runs at boot + hourly — never
+// inside a 6-minute suite run, and the row is inserted after boot, so the
+// prune assertion can only fire through getCurrentUser's inline delete.
+// Trap #34: every helper passes ARGV arrays to spawnSync.
+test.describe("expired session denial (F-NN, session-43)", () => {
+  const TOKEN = randomBytes(32).toString("hex");
+  const mintedStorageState = {
+    cookies: [
+      {
+        name: "aurelia_session",
+        value: `${TOKEN}.${createHmac("sha256", E2E_AUTH_SECRET).update(TOKEN).digest("base64url")}`,
+        domain: "localhost",
+        path: "/",
+        httpOnly: true,
+        secure: false, // http://localhost — matches the setup projects' minted cookies
+        sameSite: "Lax" as const,
+        expires: Math.floor(Date.now() / 1000) + 86_400, // the BROWSER keeps the cookie; the ROW is expired
+      },
+    ],
+    origins: [],
+  };
+
+  test.use({ storageState: mintedStorageState });
+
+  const REPO = process.cwd();
+  const E2E_DB_URL = `file:${path.join(REPO, "db", "e2e.db")}`;
+  const SQL_SCRATCH = path.join(REPO, "tests", "e2e", ".f-nn-expired.sql");
+
+  /** Read rows through Prisma on the E2E DB (the F-II/F-KK helper's shape). */
+  function dbRead(jsonExpression: string): string {
+    const script = `const {PrismaClient}=require("@prisma/client");const p=new PrismaClient({datasources:{db:{url:"${E2E_DB_URL}"}}});(${jsonExpression})(p).then(r=>{console.log("<<JSON>>"+JSON.stringify(r));return p.$disconnect()}).catch(e=>{console.error(e.message);process.exit(1)})`;
+    const res = spawnSync("node", ["-e", script], {
+      cwd: REPO,
+      env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+    });
+    if (res.status !== 0) throw new Error(`dbRead failed: ${res.stderr?.slice(0, 300)}`);
+    const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+    if (marker < 0) throw new Error(`dbRead produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+    return res.stdout.slice(marker + "<<JSON>>".length).trim();
+  }
+
+  /** SQL fixture helper — the established `prisma db execute` pattern (H-2/M-1). */
+  function sqlRun(sql: string): void {
+    writeFileSync(SQL_SCRATCH, sql);
+    try {
+      const res = spawnSync(
+        "npx",
+        ["prisma", "db", "execute", "--schema", path.join(REPO, "prisma", "schema.prisma"), "--file", SQL_SCRATCH],
+        {
+          cwd: REPO,
+          env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf-8",
+        },
+      );
+      if (res.status !== 0) throw new Error(`sqlRun failed: ${res.stderr?.slice(0, 300)}`);
+    } finally {
+      try { unlinkSync(SQL_SCRATCH); } catch { /* already gone */ }
+    }
+  }
+
+  test.beforeAll(() => {
+    // The EXPIRED session: INSERT ... SELECT resolves james's id in the DB
+    // itself (never hardcoded); expiresAt = datetime('now', '-1 day') —
+    // PAST (the seam under test; every other mint in the suite is FUTURE);
+    // idempotent delete-then-insert; the row dies in the read's own prune
+    // (asserted) and belt-and-braces in afterAll + every global-setup wipe.
+    sqlRun(
+      `DELETE FROM "Session" WHERE token = '${TOKEN}';\n` +
+        `INSERT INTO "Session" (id, token, "userId", "expiresAt", "createdAt") ` +
+        `SELECT 'fnn-james-' || '${TOKEN.slice(0, 16)}', '${TOKEN}', id, datetime('now', '-1 day'), datetime('now', '-2 day') ` +
+        `FROM "User" WHERE email = 'james@example.com';`,
+    );
+  });
+
+  test.afterAll(() => {
+    // Belt-and-braces (a no-op on a healthy prune — probe check 5): the
+    // minted row dies with the group even on mid-case failure.
+    sqlRun(`DELETE FROM "Session" WHERE token = '${TOKEN}';`);
+  });
+
+  test("an expired session no longer authenticates — the TTL revoke + inline prune (F-NN)", async ({ page }) => {
+    test.setTimeout(45_000);
+
+    // Precondition — the minted EXPIRED row exists (belt; beforeAll
+    // inserted it). The read also proves the row-shape sanity: present but
+    // past its expiry.
+    const minted = JSON.parse(
+      dbRead(`(p)=>p.session.findUnique({where:{token:"${TOKEN}"},select:{id:true,expiresAt:true}})`),
+    );
+    expect(minted, "the minted EXPIRED session row exists before the read").not.toBeNull();
+    expect(new Date(minted.expiresAt).getTime(), "the row's expiry is in the PAST").toBeLessThan(Date.now());
+
+    // LOAD-BEARING 1 (the wire denial — the TTL revoke): /account bounces
+    // to /login — getCurrentUser returned null through the expiry branch.
+    // A dropped expiry check leaves this page SIGNED-IN (the zombie-auth
+    // window) and this assertion red while every existing gate stays green
+    // (all their sessions are future-expiry).
+    await page.goto("/account");
+    await expect(page).toHaveURL(/\/login\?redirect=%2Faccount|\/login\?redirect=\/account/);
+
+    // LOAD-BEARING 2 (server truth — the inline prune): the expired row is
+    // GONE after the read (auth.ts:133's delete — the wire CANNOT see
+    // this). A dropped prune leaves the row lingering until the hourly
+    // sweeper while the wire denial above stays green — the exact
+    // silent-lingering class F-KK pinned at the logout seam.
+    const pruned = JSON.parse(
+      dbRead(`(p)=>p.session.findUnique({where:{token:"${TOKEN}"},select:{id:true}})`),
+    );
+    expect(pruned, "F-NN prune half: the expired row is deleted by the read itself").toBeNull();
+  });
+});
