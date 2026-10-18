@@ -5,10 +5,12 @@
 // extra admin login anywhere in the suite 429s the last specs. Tests needing
 // an admin-side state change use the `prisma db execute` SQL fixture pattern
 // (H-2/H-39) — never a login. Failed attempts also consume the bucket.
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import path from "node:path";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, unlinkSync } from "node:fs";
+import { createHmac, randomBytes } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { E2E_AUTH_SECRET } from "./e2e-secrets";
 
 test.describe("admin role gate (customer session)", () => {
   test("customers are redirected away from /admin", async ({ page }) => {
@@ -233,5 +235,208 @@ test.describe("admin console (admin session)", () => {
     await expect(page.getByRole("button", { name: "Hide Wide-Brim Felt Hat" })).toBeVisible();
     await page.goto("/shop");
     await expect(page.getByRole("main")).toContainText("Wide-Brim Felt Hat");
+  });
+});
+
+// Admin action EVENT-WRITE gate (session-37, F-HH).
+//
+// adminUpdateOrderAction mints OrderEvent rows INSIDE its H-29 transaction —
+// a status transition writes `type:"status_changed"`, `actor:"admin"`,
+// `note:"<old> → <new>"` (src/lib/actions/admin.ts:55, the F-16 stamp); a
+// tracking change writes `type:"tracking_added"` with the G-11 joined
+// carrier note (:78). The mutation case above drives the real form but
+// asserts only the toast + form values — the minted ROWS were never read
+// back; the F-DD gate pins the customer-side READ filter with a SQL-minted
+// fixture, never the action's WRITE. A dropped tx.orderEvent.create (or a
+// mangled actor/type/note) silently empties both timelines' deltas with
+// every gate green — the toast still says "Order updated."
+//
+// ZERO logins: the admin session is minted OFFLINE (the a11y gate's M-1/L-3
+// pattern) — a random 256-bit token, HMAC'd with the shared E2E_AUTH_SECRET,
+// backed by a Session row inserted via `prisma db execute` — the exactly
+// consumed admin bucket (SKILL §9 #23) stays untouched. The case rides the
+// REAL form seam (status select + tracking input + Save) on the real
+// session; dbRead is the LOAD-BEARING witness (server truth beyond the
+// toast), the admin timeline render is SUPPORTING.
+//
+// ORD-2026-002 is the round's order (james's, seeded in_transit / DHL /
+// 1Z8V4X209311 with 3 events): the mutation case above clicks the FIRST
+// admin-orders link (placedAt desc → ORD-2026-004, the guest order), so
+// this order keeps its seed shape when the describe runs — and the finally
+// restores the CAPTURED runtime state regardless (shared-DB discipline;
+// account-orders.spec.ts sorts before admin.spec.ts, and global-setup
+// wipes Order/OrderEvent/Session wholesale at every run start, H-22/H-25).
+// The baseline-id diff makes the event assertions collision-proof against
+// the seed's own "processing → in_transit" note.
+//
+// Trap #34 discipline: every helper passes ARGV arrays to spawnSync. Trap
+// #38: DOM-text assertions match the rendered note verbatim (the timeline
+// styling is CSS-only).
+test.describe("admin event-write path (F-HH, session-37)", () => {
+  const ADMIN_TOKEN = randomBytes(32).toString("hex");
+  const SESSION_COOKIE = `${ADMIN_TOKEN}.${createHmac("sha256", E2E_AUTH_SECRET)
+    .update(ADMIN_TOKEN)
+    .digest("base64url")}`;
+  const RUN = randomBytes(8).toString("hex"); // run-unique tracking marker
+
+  test.use({
+    storageState: {
+      cookies: [
+        {
+          name: "aurelia_session",
+          value: SESSION_COOKIE,
+          domain: "localhost",
+          path: "/",
+          httpOnly: true,
+          secure: false, // http://localhost — matches the setup projects' minted cookies
+          sameSite: "Lax" as const,
+          expires: Math.floor(Date.now() / 1000) + 86_400,
+        },
+      ],
+      origins: [],
+    },
+  });
+
+  const REPO = process.cwd();
+  const SCHEMA = path.join(REPO, "prisma", "schema.prisma");
+  const E2E_DB_URL = `file:${path.join(REPO, "db", "e2e.db")}`;
+  const SQL_SCRATCH = path.join(REPO, "tests", "e2e", ".f-hh-event.sql");
+
+  /** Read rows through Prisma on the E2E DB (the account-orders helper's shape). */
+  function dbRead(jsonExpression: string): string {
+    const script = `const {PrismaClient}=require("@prisma/client");const p=new PrismaClient({datasources:{db:{url:"${E2E_DB_URL}"}}});(${jsonExpression})(p).then(r=>{console.log("<<JSON>>"+JSON.stringify(r));return p.$disconnect()}).catch(e=>{console.error(e.message);process.exit(1)})`;
+    const res = spawnSync("node", ["-e", script], {
+      cwd: REPO,
+      env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    if (res.status !== 0) throw new Error(`dbRead failed: ${res.stderr?.slice(0, 300)}`);
+    const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+    if (marker < 0) throw new Error(`dbRead produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+    return res.stdout.slice(marker + "<<JSON>>".length).trim();
+  }
+
+  /** SQL fixture helper — the established `prisma db execute` pattern (H-2/M-1). */
+  function sqlRun(sql: string): void {
+    writeFileSync(SQL_SCRATCH, sql);
+    try {
+      const res = spawnSync(
+        "npx",
+        ["prisma", "db", "execute", "--schema", SCHEMA, "--file", SQL_SCRATCH],
+        {
+          cwd: REPO,
+          env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+        },
+      );
+      if (res.status !== 0) throw new Error(`sqlRun failed: ${res.stderr?.slice(0, 300)}`);
+    } finally {
+      try { unlinkSync(SQL_SCRATCH); } catch { /* already gone */ }
+    }
+  }
+
+  test.beforeAll(() => {
+    // INSERT ... SELECT: the seeded admin's id is resolved by the DB itself
+    // (never hardcoded); idempotent delete-then-insert; the row dies in
+    // afterAll AND at every global-setup wipe.
+    sqlRun(
+      `DELETE FROM "Session" WHERE token = '${ADMIN_TOKEN}';\n` +
+        `INSERT INTO "Session" (id, token, "userId", "expiresAt", "createdAt") ` +
+        `SELECT 'fhh-admin-' || '${ADMIN_TOKEN}', '${ADMIN_TOKEN}', id, datetime('now', '+1 day'), datetime('now') ` +
+        `FROM "User" WHERE email = 'admin@aurelia.com';`,
+    );
+  });
+
+  test.afterAll(() => {
+    sqlRun(`DELETE FROM "Session" WHERE token = '${ADMIN_TOKEN}';`);
+  });
+
+  test("status and tracking mutations mint OrderEvent rows server-side (F-HH)", async ({ page }) => {
+    test.setTimeout(45_000);
+    // Resolve the canonical order + its BASELINE (pre-case) event ids at
+    // RUNTIME — never hardcode cuids (global-setup re-seeds every run).
+    const order = JSON.parse(
+      dbRead(
+        `(p)=>p.order.findFirst({where:{number:"ORD-2026-002"},select:{id:true,status:true,carrier:true,trackingNumber:true,events:{select:{id:true},orderBy:{createdAt:"asc"}}}})`,
+      ),
+    );
+    if (!order) throw new Error("canonical fixture missing: ORD-2026-002");
+    const orderId = order.id as string;
+    const baselineIds = new Set<string>(order.events.map((e: { id: string }) => e.id));
+    expect(baselineIds.size, "the seed ships three events on ORD-2026-002").toBeGreaterThanOrEqual(3);
+    const idList = Array.from(baselineIds).map((id) => `'${id}'`).join(",");
+
+    // The minted-event witness: rows beyond the baseline id set.
+    const newEvents = () => {
+      const rows = JSON.parse(
+        dbRead(
+          `(p)=>p.orderEvent.findMany({where:{orderId:${JSON.stringify(orderId)}},select:{id:true,type:true,actor:true,note:true},orderBy:{createdAt:"asc"}})`,
+        ),
+      ) as Array<{ id: string; type: string; actor: string; note: string | null }>;
+      return rows.filter((r) => !baselineIds.has(r.id));
+    };
+
+    // Restore the CAPTURED runtime state (immune to any earlier spec's
+    // side effects) + drop exactly the rows this case minted.
+    const restore = () => {
+      sqlRun(
+        `UPDATE "Order" SET status='${order.status}', carrier=${order.carrier === null ? "NULL" : `'${order.carrier}'`}, ` +
+          `"trackingNumber"=${order.trackingNumber === null ? "NULL" : `'${order.trackingNumber}'`}, "updatedAt"=CURRENT_TIMESTAMP ` +
+          `WHERE "id"='${orderId}';\n` +
+          `DELETE FROM "OrderEvent" WHERE "orderId"='${orderId}' AND "id" NOT IN (${idList});`,
+      );
+    };
+
+    try {
+      // The real form seam on the offline-minted admin session (no login call).
+      await page.goto(`/admin/orders/${orderId}`);
+      await expect(page.getByText("Manage Order")).toBeVisible();
+
+      // Leg A — status transition (seed: in_transit → processing) mints
+      // EXACTLY ONE status_changed event with the F-16 admin stamp and the
+      // "<old> → <new>" note.
+      await page.getByLabel("Status").selectOption("processing");
+      await page.getByRole("button", { name: /save changes/i }).click();
+      await expect(page.getByRole("status")).toHaveText("Order updated.");
+
+      let rows = newEvents();
+      expect(rows.length, "leg A minted exactly one new event").toBe(1);
+      expect(rows[0].type, "leg A event type").toBe("status_changed");
+      expect(rows[0].actor, "leg A actor is the F-16 admin stamp").toBe("admin");
+      expect(rows[0].note, "leg A note is the old → new transition").toBe(
+        `${order.status} → processing`,
+      );
+
+      // SUPPORTING: the admin timeline (unfiltered) renders the minted note.
+      // The reload also re-anchors the form on server truth for leg B.
+      await page.reload();
+      await expect(page.getByText(`${order.status} → processing`).first()).toBeVisible();
+
+      // Leg B — tracking change (run-unique value) mints EXACTLY ONE
+      // tracking_added event with the G-11 joined carrier note. The form
+      // re-rendered on server truth (status select = processing = stored,
+      // carrier prefilled = stored), so ONLY the tracking differs.
+      const runTracking = `1ZFHH${RUN}`.toUpperCase();
+      await page.getByLabel("Tracking Number").fill(runTracking);
+      await page.getByRole("button", { name: /save changes/i }).click();
+      await expect(page.getByRole("status")).toHaveText("Order updated.");
+
+      rows = newEvents();
+      expect(rows.length, "legs A+B minted exactly two new events").toBe(2);
+      const trackingRow = rows.find((r) => r.type === "tracking_added");
+      expect(trackingRow, "leg B minted a tracking_added row").toBeTruthy();
+      expect(trackingRow?.actor, "leg B actor is the F-16 admin stamp").toBe("admin");
+      expect(trackingRow?.note, "leg B note joins the carrier and tracking").toBe(
+        `${order.carrier} — ${runTracking}`,
+      );
+      const statusRow = rows.find((r) => r.type === "status_changed");
+      expect(statusRow?.note, "leg A's note still exact after leg B").toBe(
+        `${order.status} → processing`,
+      );
+    } finally {
+      restore();
+    }
   });
 });
