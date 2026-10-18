@@ -1,7 +1,8 @@
 // Auth surfaces — logged-out login/register validation + rate-limit-aware
 // happy path (single login; the limiter allows 10/IP/15 min and the setup
-// project already spent one), the signed-in logout, and the password
-// rotation's session-revocation gate (F-II).
+// project already spent one), the signed-in logout, the password
+// rotation's session-revocation gate (F-II), and the profile save's
+// write gate (F-JJ).
 import { expect, test } from "@playwright/test";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -306,6 +307,118 @@ test.describe("password rotation (F-II, session-38)", () => {
       expect(verifyStoredHash("Demo1234!"), "the stored hash no longer verifies the old password").toBe(false);
     } finally {
       restore();
+    }
+  });
+});
+
+// F-JJ (session-39): the profile save's WRITE contract. The sibling seam of
+// the F-II password rotation — updateProfileAction
+// (src/lib/actions/account.ts:11-27) parses the name through the governed
+// profileSchema (H-33, unit-pinned) and writes db.user.update; NO spec ever
+// drove the Profile tab's name form (the only name-value assertion in the
+// whole suite was the logout case's READ of the prefilled value at line 79),
+// so a dropped (or no-op) write leaves the toast green ("Profile updated.")
+// while the customer's name never changes — the toast-blind silent class.
+// ZERO logins, ZERO registers, ZERO limiter consumption (updateProfileAction
+// carries no limiter): the case rides the per-project storageState and the
+// finally restores the CAPTURED name byte-identically. Trap #34: every helper
+// passes ARGV arrays to spawnSync.
+test.describe("profile update write (F-JJ, session-39)", () => {
+  const RUN = randomBytes(8).toString("hex"); // run-unique name marker
+
+  const REPO = process.cwd();
+  const E2E_DB_URL = `file:${path.join(REPO, "db", "e2e.db")}`;
+  const SQL_SCRATCH = path.join(REPO, "tests", "e2e", ".f-jj-profile.sql");
+
+  /** Read rows through Prisma on the E2E DB (the F-II helper's shape). */
+  function dbRead(jsonExpression: string): string {
+    const script = `const {PrismaClient}=require("@prisma/client");const p=new PrismaClient({datasources:{db:{url:"${E2E_DB_URL}"}}});(${jsonExpression})(p).then(r=>{console.log("<<JSON>>"+JSON.stringify(r));return p.$disconnect()}).catch(e=>{console.error(e.message);process.exit(1)})`;
+    const res = spawnSync("node", ["-e", script], {
+      cwd: REPO,
+      env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    if (res.status !== 0) throw new Error(`dbRead failed: ${res.stderr?.slice(0, 300)}`);
+    const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+    if (marker < 0) throw new Error(`dbRead produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+    return res.stdout.slice(marker + "<<JSON>>".length).trim();
+  }
+
+  /** SQL restore helper — the established `prisma db execute` pattern (H-2). */
+  function sqlRun(sql: string): void {
+    writeFileSync(SQL_SCRATCH, sql);
+    try {
+      const res = spawnSync(
+        "npx",
+        ["prisma", "db", "execute", "--schema", path.join(REPO, "prisma", "schema.prisma"), "--file", SQL_SCRATCH],
+        {
+          cwd: REPO,
+          env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+        },
+      );
+      if (res.status !== 0) throw new Error(`sqlRun failed: ${res.stderr?.slice(0, 300)}`);
+    } finally {
+      try { unlinkSync(SQL_SCRATCH); } catch { /* already gone */ }
+    }
+  }
+
+  test("a profile save actually writes the name (F-JJ)", async ({ page }) => {
+    test.setTimeout(45_000);
+    // Capture the runtime state — never hardcode (immune to drift; the
+    // finally restores these exact bytes).
+    const user = JSON.parse(
+      dbRead(
+        `(p)=>p.user.findUnique({where:{email:"james@example.com"},select:{name:true,email:true}})`,
+      ),
+    );
+    if (!user) throw new Error("canonical fixture missing: james");
+    const capturedName = user.name as string;
+
+    // SQL-escape the captured value for the restore statement (SQLite
+    // doubles single quotes).
+    const capturedNameSql = capturedName.replace(/'/g, "''");
+
+    const newName = `James E2E Profile ${RUN}`;
+
+    try {
+      // The real form seam on the storageState session — no login, no
+      // crafted POST.
+      await page.goto("/account");
+      await expect(page.getByRole("heading", { name: /My Account/i })).toBeVisible();
+      await page.getByRole("tab", { name: "Profile" }).click();
+
+      await page.locator("#profile-name").fill(newName);
+      await page.getByRole("button", { name: /save changes/i }).click();
+      // SUPPORTING — the toast the mutation demo keeps green.
+      await expect(page.getByRole("status")).toHaveText("Profile updated.");
+
+      // LOAD-BEARING — the WRITE half: the User row's name IS the new name
+      // (server truth; the toast CANNOT see this — a dropped write leaves
+      // the toast green while the name never changes).
+      const after = JSON.parse(
+        dbRead(
+          `(p)=>p.user.findUnique({where:{email:"james@example.com"},select:{name:true,email:true}})`,
+        ),
+      );
+      expect(after.name, "F-JJ write half: the User row's name is the new name").toBe(newName);
+      // The action writes name only — the email invariant.
+      expect(after.email, "the email is untouched by the profile save").toBe("james@example.com");
+
+      // The wire-real half — a fresh /account render prefills #profile-name
+      // with the NEW name (the write landed; the form's defaultValue flows
+      // from the server prop through the RSC render).
+      await page.goto("/account");
+      await expect(page.getByRole("heading", { name: /My Account/i })).toBeVisible();
+      await page.getByRole("tab", { name: "Profile" }).click();
+      await expect(page.locator("#profile-name")).toHaveValue(newName);
+    } finally {
+      // Restore the CAPTURED name byte-identically — runs even on mid-case
+      // failure; nothing probe-scoped survives (H-24; the seed upserts the
+      // canonical name at every global-setup anyway).
+      sqlRun(`UPDATE "User" SET name='${capturedNameSql}' WHERE "email"='james@example.com';`);
     }
   });
 });
