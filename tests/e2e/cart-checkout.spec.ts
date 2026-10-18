@@ -23,7 +23,7 @@
 // guest email. Rate-limit budget: checkout is 10/10min per IP (one shared
 // bucket); this suite spends 2/project (COD + card) + 1/project (F-CC)
 // = 6 < 10 per run.
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import path from "node:path";
 import { writeFileSync } from "node:fs";
 import { createHmac } from "node:crypto";
@@ -484,5 +484,135 @@ test.describe("owner capability rows of the success gate (F-FF, session-35)", ()
     );
     expect(cross?.status(), "row 3b: status").toBe(404);
     await expect(page.getByText("Page Not Found"), "row 3b: not-found card").toBeVisible();
+  });
+});
+
+// Checkout transaction write set (session-42, F-MM).
+//
+// The money path's own transaction — placeOnce (src/lib/actions/checkout.ts:125-204)
+// — writes FIVE things in ONE tx; the existing gates pinned only ONE of them
+// (the Order + OrderItem rows, via the COD/card confirmations + F-CC's matrix).
+// The other three halves were wire-blind on every existing assertion:
+//
+//   1. the per-item STOCK DECREMENT (:142-154) — no spec ever reads a
+//      product's stock after a checkout (H-7/H-15 pin the ADMIN edit seam;
+//      H-39 pins the ADJUST seam) — a dropped decrement leaves the storefront
+//      selling stock that is already sold (the README's own "stock decrement
+//      + oversell guard in one transaction" contract, half-pinned);
+//   2. the initial 'placed' OrderEvent mint (:198) — F-DD pins the SEED's
+//      events on the account timeline, F-HH pins the ADMIN mutation's mints;
+//      neither reads a NEWLY placed order's timeline — a dropped mint leaves
+//      the customer's AND the admin's timelines for every new order empty;
+//   3. the post-placement CART PURGE (:202) — every "bag is empty" assertion
+//      flows through removeCartItemAction or the client-side EMPTY_CART
+//      store; the COD/card cases never re-render the cart after placement,
+//      and the mid-file guest-merge's emptyTheBag absorbs exactly the
+//      lingering rows a dropped purge would leave — a dropped deleteMany
+//      re-fills the bag on the next server render (the double-purchase
+//      exposure).
+//
+// The confirmation page is the "toast": all three dropped-write shapes keep
+// it green. This case drives the REAL COD flow once and reads the three
+// halves SERVER-TRUTH (the toast cannot see them) plus the purge's
+// wire-real half (a FRESH /cart render — the RSC read, not the client
+// store's EMPTY_CART).
+//
+// Budget: checkout is 10/10min per IP (one shared bucket); this suite spends
+// 2/project (COD + card) + 1/project (F-CC) + 1/project (F-MM) = 8 < 10 per
+// run — the ledger the F-CC header documents, extended.
+//
+// Cleanup (H-24) — the cleanest fixture in the suite: the placed order +
+// items + events die in global-setup's wholesale Order/OrderItem/OrderEvent
+// wipe at every run start (H-22/H-25); the stock decrement resets via the
+// seed's product.upsert (stock: 12) re-pinned at every global-setup; james's
+// cart ends empty (the purge under test IS the cleanup). No afterAll, no
+// SQL fixture, no minted rows. Within-run isolation: this describe sorts
+// LAST in the file; the only order-count specs (admin.spec's H-2 total +
+// dashboard KPIs + F-LL) run BEFORE cart-checkout.spec.ts alphabetically
+// (workers:1, fullyParallel:false — the serial topology).
+test.describe("checkout transaction write set (F-MM, session-42)", () => {
+  // The default storageState IS james's (the setup projects' canonical
+  // session) — no test.use here is deliberate: the flow under test is the
+  // SESSION-BEARING checkout (the F-FF context). ZERO logins, ZERO registers.
+
+  const REPO = process.cwd();
+  const E2E_DB_URL = `file:${path.join(REPO, "db", "e2e.db")}`;
+
+  /** Read rows through Prisma on the E2E DB (the F-HH helper's shape). */
+  function dbRead(jsonExpression: string): unknown {
+    const script = `const {PrismaClient}=require("@prisma/client");const p=new PrismaClient({datasources:{db:{url:"${E2E_DB_URL}"}}});(${jsonExpression})(p).then(r=>{console.log("<<JSON>>"+JSON.stringify(r));return p.$disconnect()}).catch(e=>{console.error(e.message);process.exit(1)})`;
+    const res = spawnSync("node", ["-e", script], {
+      cwd: REPO,
+      env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    if (res.status !== 0) throw new Error(`dbRead failed: ${res.stderr?.slice(0, 300)}`);
+    const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+    if (marker < 0) throw new Error(`dbRead produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+    return JSON.parse(res.stdout.slice(marker + "<<JSON>>".length).trim());
+  }
+
+  test("the placement writes the stock decrement, the placed event, and the purge (F-MM)", async ({ page }) => {
+    test.setTimeout(90_000);
+    const VICTIM = "silk-draped-evening-gown"; // openDrawerWithItem's product; H-39 manipulates wide-brim-felt-hat only
+
+    // Deterministic start + capture-before (never hardcode — the stock is
+    // whatever this run's earlier placements left: the seed re-pins 12 at
+    // every global-setup, COD/card/F-CC each decrement before this case).
+    await emptyTheBag(page);
+    const before = dbRead(
+      `(p)=>p.product.findUnique({where:{slug:"${VICTIM}"},select:{stock:true}})` +
+        `.then(async(pr)=>({stock:pr.stock,jamesLines:await p.cartItem.count({where:{cart:{user:{email:"james@example.com"}}}})}))`,
+    ) as { stock: number; jamesLines: number };
+    expect(before.jamesLines, "the deterministic start: james's bag is empty server-side").toBe(0);
+    expect(before.stock, "the victim's stock resolves (capture-before)").toBeGreaterThan(0);
+
+    // The REAL COD flow (the proven shape): PDP add → wizard → place.
+    await page.goto(`/product/${VICTIM}`);
+    await page.locator("main").getByRole("button", { name: "Add to Bag" }).first().click();
+    await expect(page.getByTestId("cart-drawer")).toBeVisible();
+    await page.goto("/checkout");
+    await page.getByLabel("Full Name").fill("James Whitmore");
+    await page.getByLabel("Street Address").fill("212 Mercer Street, Apt 4B");
+    await page.getByLabel("City").fill("New York");
+    await page.getByLabel("State").fill("NY");
+    await page.getByLabel("ZIP").fill("10012");
+    await page.getByRole("button", { name: "Continue to Payment" }).click();
+    await page.getByText("Cash on Delivery").click();
+    await page.getByRole("button", { name: "Review Order" }).click();
+    await page.getByRole("button", { name: /place order/i }).click();
+    await expect(page).toHaveURL(/\/checkout\/success/, { timeout: 20_000 });
+    const orderNumber = new URL(page.url()).searchParams.get("order") || "";
+    expect(orderNumber, "the order number parses from the success URL (the F-CC shape)").toMatch(/^ORD-\d{4}-\d{3}$/);
+    await expect(page.getByText(new RegExp(orderNumber.replace("-", "\\-")))).toBeVisible();
+
+    // LOAD-BEARING #1 — the decrement half (the oversell guard's own write).
+    const stockAfter = dbRead(
+      `(p)=>p.product.findUnique({where:{slug:"${VICTIM}"},select:{stock:true}})`,
+    ) as { stock: number } | null;
+    expect(stockAfter?.stock, "the victim's stock decremented exactly the line quantity (1)").toBe(before.stock - 1);
+
+    // LOAD-BEARING #2 — the 'placed' OrderEvent mint (the timeline seed BOTH
+    // sides render; actor 'system' — the F-16 customer-visible class).
+    const events = dbRead(
+      `(p)=>p.orderEvent.findMany({where:{order:{number:"${orderNumber}"}},select:{type:true,actor:true,note:true},orderBy:{createdAt:"asc"}})`,
+    ) as Array<{ type: string; actor: string; note: string | null }>;
+    expect(events, "exactly ONE event on the new order").toHaveLength(1);
+    expect(events[0]?.type, "the event is the 'placed' seed").toBe("placed");
+    expect(events[0]?.actor, "the actor is 'system' (customer-visible, F-16)").toBe("system");
+    expect(events[0]?.note).toBeNull();
+
+    // LOAD-BEARING #3 — the purge half (james's bag is empty SERVER-SIDE).
+    const linesAfter = dbRead(
+      `(p)=>p.cartItem.count({where:{cart:{user:{email:"james@example.com"}}}})`,
+    ) as number;
+    expect(linesAfter, "the cart rows are purged after placement (server truth)").toBe(0);
+
+    // SUPPORTING (wire-real) — the purge's RSC half: a FRESH /cart render
+    // shows the empty state (NOT the client store's EMPTY_CART — a server
+    // re-read; a dropped deleteMany re-fills the bag right here).
+    await page.goto("/cart");
+    await expect(page.getByText("Your bag is empty")).toBeVisible();
   });
 });
