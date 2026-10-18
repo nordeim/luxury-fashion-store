@@ -1,13 +1,15 @@
 // Auth surfaces — logged-out login/register validation + rate-limit-aware
 // happy path (single login; the limiter allows 10/IP/15 min and the setup
 // project already spent one), the signed-in logout, the password
-// rotation's session-revocation gate (F-II), and the profile save's
-// write gate (F-JJ).
+// rotation's session-revocation gate (F-II), the profile save's write gate
+// (F-JJ), and the logout's session-row revocation gate (F-KK).
 import { expect, test } from "@playwright/test";
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
+
+import { E2E_AUTH_SECRET } from "./e2e-secrets";
 
 const loggedOut = { storageState: { cookies: [], origins: [] } };
 
@@ -420,5 +422,159 @@ test.describe("profile update write (F-JJ, session-39)", () => {
       // canonical name at every global-setup anyway).
       sqlRun(`UPDATE "User" SET name='${capturedNameSql}' WHERE "email"='james@example.com';`);
     }
+  });
+});
+
+// Logout ROW-REVOCATION gate (session-40, F-KK).
+//
+// destroySession (src/lib/auth.ts:99-109) does TWO things: revokes the
+// Session row — db.session.deleteMany({ where: { token } }) at :105 — and
+// clears the cookie (:108). The session table IS the denylist (ADR-006,
+// the auth.ts header says so verbatim), and logout is the user's canonical
+// "kill my session" action: the exact moment a user who suspects a stolen
+// cookie reaches for. Yet the existing logout case (above) asserts only
+// what the wire can see — the redirect to / and the post-logout
+// /account → /login bounce — and the bounce is driven by the COOKIE CLEAR
+// ALONE: a dropped (or no-op'd) deleteMany leaves every existing assertion
+// green while the Session row LINGERS with up to ~30 days of validity. A
+// cookie value stolen BEFORE the logout (the same hijacker F-4's comment
+// documents at the password seam, F-II pinned on the rotation) then
+// SURVIVES the user's logout — the browser-side cookie clear does nothing
+// to the copy in the attacker's jar, and the row it authenticates against
+// stays alive.
+//
+// ZERO logins, ZERO registers, ZERO limiter consumption (logoutAction
+// carries no limiter — verified by source read; only
+// login/register/newsletter/checkout are rate-limited): the session under
+// test is minted OFFLINE (the F-II hijack / F-HH admin / a11y M-1 family's
+// second customer-side use — a random 256-bit token, the cookie signed
+// token.hmac with the shared E2E_AUTH_SECRET, the row inserted via
+// `prisma db execute` with james's id resolved by the DB itself). The
+// describe's storageState carries ONLY the minted cookie — the project's
+// setup session is never ridden, never destroyed (the H-24 trap the
+// original logout case documents). The mint is exactly the no-register /
+// no-login shape the session-39 plan §8 #16 prefers.
+//
+// Cleanup discipline (H-24): the afterAll belt-and-braces DELETE is a
+// no-op on a healthy logout (probe check 10) and runs even on mid-case
+// failure; global-setup wipes the Session table wholesale at every run
+// start anyway (H-22/H-25). Trap #34: every helper passes ARGV arrays to
+// spawnSync.
+test.describe("logout row revocation (F-KK, session-40)", () => {
+  const TOKEN = randomBytes(32).toString("hex");
+  const mintedStorageState = {
+    cookies: [
+      {
+        name: "aurelia_session",
+        value: `${TOKEN}.${createHmac("sha256", E2E_AUTH_SECRET).update(TOKEN).digest("base64url")}`,
+        domain: "localhost",
+        path: "/",
+        httpOnly: true,
+        secure: false, // http://localhost — matches the setup projects' minted cookies
+        sameSite: "Lax" as const,
+        expires: Math.floor(Date.now() / 1000) + 86_400,
+      },
+    ],
+    origins: [],
+  };
+
+  test.use({ storageState: mintedStorageState });
+
+  const REPO = process.cwd();
+  const E2E_DB_URL = `file:${path.join(REPO, "db", "e2e.db")}`;
+  const SQL_SCRATCH = path.join(REPO, "tests", "e2e", ".f-kk-logout.sql");
+
+  /** Read rows through Prisma on the E2E DB (the F-II helper's shape). */
+  function dbRead(jsonExpression: string): string {
+    const script = `const {PrismaClient}=require("@prisma/client");const p=new PrismaClient({datasources:{db:{url:"${E2E_DB_URL}"}}});(${jsonExpression})(p).then(r=>{console.log("<<JSON>>"+JSON.stringify(r));return p.$disconnect()}).catch(e=>{console.error(e.message);process.exit(1)})`;
+    const res = spawnSync("node", ["-e", script], {
+      cwd: REPO,
+      env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    if (res.status !== 0) throw new Error(`dbRead failed: ${res.stderr?.slice(0, 300)}`);
+    const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+    if (marker < 0) throw new Error(`dbRead produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+    return res.stdout.slice(marker + "<<JSON>>".length).trim();
+  }
+
+  /** SQL fixture helper — the established `prisma db execute` pattern (H-2/M-1). */
+  function sqlRun(sql: string): void {
+    writeFileSync(SQL_SCRATCH, sql);
+    try {
+      const res = spawnSync(
+        "npx",
+        ["prisma", "db", "execute", "--schema", path.join(REPO, "prisma", "schema.prisma"), "--file", SQL_SCRATCH],
+        {
+          cwd: REPO,
+          env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+        },
+      );
+      if (res.status !== 0) throw new Error(`sqlRun failed: ${res.stderr?.slice(0, 300)}`);
+    } finally {
+      try { unlinkSync(SQL_SCRATCH); } catch { /* already gone */ }
+    }
+  }
+
+  test.beforeAll(() => {
+    // The minted session: INSERT ... SELECT resolves james's id in the DB
+    // itself (never hardcoded); idempotent delete-then-insert; the row dies
+    // in the logout's revocation itself (asserted) and belt-and-braces in
+    // afterAll + every global-setup wipe.
+    sqlRun(
+      `DELETE FROM "Session" WHERE token = '${TOKEN}';\n` +
+        `INSERT INTO "Session" (id, token, "userId", "expiresAt", "createdAt") ` +
+        `SELECT 'fkk-james-' || '${TOKEN.slice(0, 16)}', '${TOKEN}', id, datetime('now', '+1 day'), datetime('now') ` +
+        `FROM "User" WHERE email = 'james@example.com';`,
+    );
+  });
+
+  test.afterAll(() => {
+    // Belt-and-braces (a no-op on a healthy logout — probe check 10): the
+    // minted row dies with the group even on mid-case failure.
+    sqlRun(`DELETE FROM "Session" WHERE token = '${TOKEN}';`);
+  });
+
+  test("a logout revokes the session ROW, not just the cookie (F-KK)", async ({ page }) => {
+    test.setTimeout(45_000);
+
+    // Precondition — the minted row exists (belt; beforeAll inserted it).
+    const minted = JSON.parse(
+      dbRead(`(p)=>p.session.findUnique({where:{token:"${TOKEN}"},select:{id:true}})`),
+    );
+    expect(minted, "the minted session row exists before the logout").not.toBeNull();
+
+    // SUPPORTING — the mint's WIRE VALIDITY: the cookie + row render
+    // /account signed-in (a fresh context carrying the minted cookie is
+    // indistinguishable from a logged-in james — the attacker's-eye view
+    // of a stolen cookie).
+    await page.goto("/account");
+    await expect(page.getByRole("heading", { name: /My Account/i })).toBeVisible();
+
+    // The REAL logout seam — the account-tabs form drives logoutAction.
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page).toHaveURL(/\/$/, { timeout: 15_000 });
+
+    // LOAD-BEARING — the REVOKE half: the minted Session row is GONE
+    // (server truth; the wire CANNOT see this — the exact assertion the
+    // existing logout case cannot make. A dropped deleteMany leaves this
+    // row alive up to ~30d while every URL-level assertion stays green).
+    const revoked = JSON.parse(
+      dbRead(`(p)=>p.session.findUnique({where:{token:"${TOKEN}"},select:{id:true}})`),
+    );
+    expect(revoked, "F-KK revoke half: the session row is revoked by the logout").toBeNull();
+
+    // SUPPORTING — the wire half (the cookie-clear side, the half the
+    // existing logout case already pins): a fresh /account fetch bounces
+    // to /login. Re-asserted here so a BOTH-halves-dropped regression
+    // fails visibly in this case too.
+    await page.goto("/account");
+    await expect(page).toHaveURL(/\/login/);
+    // And the cookie itself is gone from the context.
+    const sessionCookie = (await page.context().cookies()).find((c) => c.name === "aurelia_session");
+    expect(sessionCookie, "the aurelia_session cookie is cleared").toBeUndefined();
   });
 });
