@@ -23,9 +23,10 @@
 // guest email. Rate-limit budget: checkout is 10/10min per IP (one shared
 // bucket); this suite spends 2/project (COD + card) + 1/project (F-CC)
 // = 6 < 10 per run.
-import { execSync, spawnSync } from "node:child_process";
+import { execSync, spawn, spawnSync } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
-import { writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHmac } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { E2E_AUTH_SECRET } from "./e2e-secrets";
@@ -614,5 +615,283 @@ test.describe("checkout transaction write set (F-MM, session-42)", () => {
     // re-read; a dropped deleteMany re-fills the bag right here).
     await page.goto("/cart");
     await expect(page.getByText("Your bag is empty")).toBeVisible();
+  });
+});
+
+// F-QQ (session-46) — the checkout seam's limiter floor over the wire. The
+// last un-gated abuse floor in the action seams: placeOrderAction's
+// `rateLimit("checkout:"+ip, 10, 10min)` (checkout.ts:66-70) — the 11th
+// same-IP attempt must answer `fail("Too many attempts. Try again in N
+// seconds.")`. Ungated since the limiter's introduction; every existing
+// placeOrderAction consume in the suite is lawful and far under 10 (the
+// documented budget: 8 < 10 per run), so a dropped `if (!limiter.allowed)`
+// block rides an order-spam burst through with all gates green — the
+// silent-abuse class F-OO closed for /api/search and F-PP closed for the
+// auth actions.
+//
+// The F-OO/F-PP harness insight, applied to the checkout seam with two
+// twists:
+//   1. NO valid cart is needed — the limiter fires BEFORE findCart
+//      (checkout.ts:67 before :73), and a cart-less guest's findCart reads
+//      null (a pure read — cart.ts:65-73 never creates), so every burst
+//      iteration answers "Your bag is empty." with ZERO writes; the 11th
+//      answers the floor.
+//   2. the wire shape is the JS-path FETCH-ACTION dispatch, not the F-PP
+//      no-JS $ACTION_REF form: CheckoutFlow renders NO <form action> (the
+//      dispatch is programmatic — startTransition(() => formAction(fd))),
+//      and the cart-less /checkout page redirects at render time, which
+//      would swallow the MPA re-render. The measured shape (probe,
+//      session-46): POST /checkout + `Next-Action: <placeOrderId>` header +
+//      multipart body where the `_1_<formField>` entries PRECEDE the flight
+//      row `"0"` = `[null,"$K1"]` (the server's `case "K"` reassembly
+//      walks referencedEntries in order and breaks at the first
+//      non-matching key — the order rule the probe's first run caught when
+//      the wrong order answered the Zod-null envelope). The response is
+//      the flight stream carrying the ActionResult — the envelope
+//      assertable in the body bytes.
+//
+// The throwaway spawns against a COPY of db/e2e.db (the serial topology
+// keeps the suite DB quiescent at copy time) WITH TRUST_PROXY=1 so
+// per-request X-Forwarded-For headers give the case exact per-IP bucket
+// control (the rate-limit.ts clientIpFrom H-35 contract) — the per-IP
+// control pins the KEY SHAPE (checkout:<ip>, not a global lockout): a
+// mutation collapsing clientIpFrom to a constant passes every existing
+// gate (the suite runs without TRUST_PROXY — every existing consume is
+// checkout:local either way).
+//
+// ZERO logins, ZERO registers, ZERO main-server limiter consumption, ZERO
+// DB writes anywhere (the burst carries no cookies — findCart reads null
+// every time; the copy is deleted with its tmpdir in the finally).
+test.describe("checkout limiter floor (F-QQ, session-46)", () => {
+  const FQQ_PORT = 3213;
+  const FQQ_BASE = `http://localhost:${FQQ_PORT}`;
+  const REPO = process.cwd();
+  const STANDALONE = path.join(REPO, ".next", "standalone", "server.js");
+  const CHECKOUT_MANIFEST = path.join(
+    REPO,
+    ".next/standalone/.next/server/app/(storefront)/checkout/page/server-reference-manifest.json",
+  );
+  const E2E_DB_FILE = path.join(REPO, "db", "e2e.db");
+
+  // RFC 5737 documentation ranges — never routable, only ever bucket keys.
+  const IP_A = "198.51.100.10";
+  const IP_B = "198.51.100.99";
+
+  const EMPTY_BAG_MSG = "Your bag is empty.";
+  const LINE_GONE_MSG = "That bag line no longer exists.";
+  const FLOOR_RE = /Too many attempts\. Try again in (\d+) seconds/;
+
+  const COD_PAYLOAD = {
+    email: `fqq-burst-${process.pid}@example.com`,
+    fullName: "FQQ Burst Probe",
+    street: "1 Probe Lane",
+    city: "Probe City",
+    state: "Probe State",
+    zip: "12345",
+    country: "United States",
+    paymentMethod: "cod",
+  };
+
+  /** The measured fetch-action dispatch (the probe's wire shape). The
+   * `_1_*` fields MUST precede the flight row "0" — the server's ordered
+   * referencedEntries walk breaks at the first non-matching key (the
+   * session-46 probe caught the order rule first-hand: the reversed order
+   * answered the Zod-null envelope because "$K1" reassembled empty). */
+  async function postCheckoutAction(
+    actionId: string,
+    fields: Record<string, string>,
+    xff: string,
+  ): Promise<{ status: number; body: string; setCookie: string }> {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(fields)) fd.set(`_1_${k}`, v);
+    fd.set("0", '[null,"$K1"]');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15_000);
+    try {
+      const res = await fetch(`${FQQ_BASE}/checkout`, {
+        method: "POST",
+        headers: { "Next-Action": actionId, "X-Forwarded-For": xff },
+        body: fd,
+        signal: ctrl.signal,
+      });
+      const cookie = (res.headers.getSetCookie?.() ?? []).join("\n");
+      return { status: res.status, body: await res.text(), setCookie: cookie };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** The action-seam gate's JSON-arg probe shape (the sibling sweep). */
+  async function postJsonAction(actionId: string, payload: unknown[]): Promise<{ status: number; body: string }> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15_000);
+    try {
+      const res = await fetch(`${FQQ_BASE}/checkout`, {
+        method: "POST",
+        headers: { "Next-Action": actionId, "Content-Type": "text/plain;charset=UTF-8" },
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      });
+      return { status: res.status, body: await res.text() };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Read a count through Prisma on the THROWAWAY copy (dbRead's shape). */
+  function copyCount(copyUrl: string, model: "order" | "cartItem" | "user"): number {
+    const script =
+      `const {PrismaClient}=require("@prisma/client");` +
+      `const p=new PrismaClient({datasources:{db:{url:"${copyUrl}"}}});` +
+      `p.${model}.count().then(c=>{console.log("<<JSON>>"+c);return p.$disconnect()})` +
+      `.catch(e=>{console.error(e.message);process.exit(1)})`;
+    const res = spawnSync("node", ["-e", script], {
+      cwd: REPO,
+      env: { ...process.env, DATABASE_URL: copyUrl },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    if (res.status !== 0) throw new Error(`copyCount(${model}) failed: ${res.stderr?.slice(0, 300)}`);
+    const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+    if (marker < 0) throw new Error(`copyCount(${model}) produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+    return Number(res.stdout.slice(marker + "<<JSON>>".length).trim());
+  }
+
+  test("the 11th same-IP checkout attempt answers the limiter floor; a different IP is not floored (F-QQ)", async () => {
+    test.setTimeout(60_000);
+
+    // The throwaway: a tmpdir holding a COPY of the suite DB + the
+    // standalone on :3213 with its own fresh limiter buckets and
+    // TRUST_PROXY=1 (the per-IP control mechanism).
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "aurelia-fqq-"));
+    const copyPath = path.join(tmp, "copy.db");
+    copyFileSync(E2E_DB_FILE, copyPath);
+    const copyUrl = `file:${copyPath}`;
+    const before = {
+      order: copyCount(copyUrl, "order"),
+      cartItem: copyCount(copyUrl, "cartItem"),
+      user: copyCount(copyUrl, "user"),
+    };
+
+    let child: ReturnType<typeof spawn> | null = null;
+    try {
+      child = spawn("node", [STANDALONE], {
+        cwd: REPO,
+        env: {
+          ...process.env,
+          PORT: String(FQQ_PORT),
+          NODE_ENV: "production",
+          AUTH_SECRET: E2E_AUTH_SECRET,
+          TRUST_PROXY: "1",
+          DATABASE_URL: copyUrl,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stderrTail = "";
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderrTail = (stderrTail + chunk.toString("utf8")).slice(-800);
+      });
+
+      // Boot + listen (the load-bearing feasibility check).
+      const deadline = Date.now() + 25_000;
+      let booted = false;
+      while (Date.now() < deadline) {
+        try {
+          const probe = await fetch(`${FQQ_BASE}/api/health`);
+          const text = await probe.text();
+          if (probe.status === 200 && text.includes('"db":true')) {
+            booted = true;
+            break;
+          }
+        } catch { /* not listening yet */ }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      expect(booted, `throwaway must boot against the copy; stderr: ${stderrTail.slice(0, 300)}`).toBe(true);
+
+      // The authoritative id set (the build-shape canary: a Next.js upgrade
+      // that reshapes the manifest fails HERE, loudly).
+      const manifest = JSON.parse(readFileSync(CHECKOUT_MANIFEST, "utf8")) as {
+        node?: Record<string, { exportedName?: string; filename?: string }>;
+      };
+      const entries = Object.entries(manifest.node ?? {});
+      expect(entries, `manifest at ${CHECKOUT_MANIFEST}`).toHaveLength(3);
+      for (const [id] of entries) expect(id).toMatch(/^[0-9a-f]{40,}$/);
+      const placeEntries = entries.filter(
+        ([, v]) => v?.exportedName === "placeOrderAction" && v?.filename === "src/lib/actions/checkout.ts",
+      );
+      expect(placeEntries, "exactly one placeOrderAction on the checkout route").toHaveLength(1);
+      const placeId = placeEntries[0][0];
+
+      // The wire-shape probe (burst iteration 1 for IP-A — the probe IS the
+      // first consume): the crafted fetch-action POST answers the cart-less
+      // envelope — wire-real discrimination of placeOrderAction. No cookie
+      // is minted (findCart read null; nothing wrote).
+      const iter1 = await postCheckoutAction(placeId, COD_PAYLOAD, IP_A);
+      expect(iter1.status, "action errors are envelopes, never 5xx").toBe(200);
+      expect(iter1.body, "the cart-less envelope identifies placeOrderAction").toContain(EMPTY_BAG_MSG);
+      expect(iter1.body).toContain('"ok":false');
+      expect(iter1.setCookie, "a cart-less burst mints nothing").toBe("");
+
+      // The fail-closed sweep over the sibling ids: garbage line ids answer
+      // the cart-line envelope, never 5xx (their payloads never reach the
+      // checkout bucket — different actions, no limiters of their own).
+      for (const [sibId, sib] of entries) {
+        if (sibId === placeId) continue;
+        const probe = await postJsonAction(sibId, ["nonexistent-fqq-probe-id", 1]);
+        expect(probe.status, `${sib?.exportedName} stays fail-closed`).toBe(200);
+        expect(probe.body).not.toContain("Internal Server Error");
+        expect(probe.body, `${sib?.exportedName} answers the cart-line envelope`).toContain(LINE_GONE_MSG);
+      }
+
+      // LOAD-BEARING 1 (the floor): iterations 2..10 stay in the lawful
+      // window (the cart-less envelope — the floor must not fire early),
+      // then the 11th same-IP attempt hits the floor with a bounded
+      // retry-seconds value (the window is 10 minutes → N ∈ 1..600). A
+      // dropped placeOrderAction limiter block makes the 11th answer the
+      // cart-less envelope instead — exactly where this assertion goes red
+      // while every existing gate stays green (all their consumes are
+      // lawful « 10).
+      for (let i = 2; i <= 10; i++) {
+        const r = await postCheckoutAction(placeId, COD_PAYLOAD, IP_A);
+        expect(r.status, `iteration ${i}`).toBe(200);
+        expect(r.body, `iteration ${i} stays in the lawful window`).toContain(EMPTY_BAG_MSG);
+        expect(r.body, `iteration ${i} must not hit the floor early`).not.toMatch(FLOOR_RE);
+      }
+      const floored = await postCheckoutAction(placeId, COD_PAYLOAD, IP_A);
+      const floorMatch = FLOOR_RE.exec(floored.body);
+      const floorSeconds = floorMatch ? Number(floorMatch[1]) : 0;
+      expect(floorMatch, "the 11th same-IP checkout answers the floor envelope").not.toBeNull();
+      expect(floorSeconds, "the retry hint is bounded (1..600)").toBeGreaterThanOrEqual(1);
+      expect(floorSeconds, "the retry hint is bounded (1..600)").toBeLessThanOrEqual(600);
+
+      // LOAD-BEARING 2 (the per-IP key shape): IP-B's post answers the
+      // lawful envelope — clientIpFrom honors the first XFF hop under
+      // TRUST_PROXY=1, so IP-A's exhausted bucket must not leak across
+      // keys. A mutation collapsing the IP to a constant makes IP-B answer
+      // the FLOOR here — the key-shape half no existing gate reads.
+      const control = await postCheckoutAction(placeId, COD_PAYLOAD, IP_B);
+      expect(control.status).toBe(200);
+      expect(control.body, "a different IP is not floored (the per-IP key shape)").toContain(EMPTY_BAG_MSG);
+      expect(control.body, "the floor must not leak across bucket keys").not.toMatch(FLOOR_RE);
+
+      // The zero-writes proof (server truth the wire cannot see): the whole
+      // ladder persisted nothing on the throwaway copy. The main e2e.db was
+      // never written (only read once, at copyFileSync).
+      expect(copyCount(copyUrl, "order"), "no orders minted").toBe(before.order);
+      expect(copyCount(copyUrl, "cartItem"), "no bag lines minted").toBe(before.cartItem);
+      expect(copyCount(copyUrl, "user"), "no users minted").toBe(before.user);
+    } finally {
+      if (child) {
+        const force = setTimeout(() => child?.kill("SIGKILL"), 5_000);
+        const exited = new Promise<void>((resolve) => {
+          const c = child;
+          if (c) c.on("exit", () => resolve());
+        });
+        child.kill("SIGTERM");
+        await exited;
+        clearTimeout(force);
+      }
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
