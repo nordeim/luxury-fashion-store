@@ -2,11 +2,13 @@
 // happy path (single login; the limiter allows 10/IP/15 min and the setup
 // project already spent one), the signed-in logout, the password
 // rotation's session-revocation gate (F-II), the profile save's write gate
-// (F-JJ), and the logout's session-row revocation gate (F-KK).
+// (F-JJ), the logout's session-row revocation gate (F-KK), the TTL-revoke
+// read gate (F-NN), and the auth limiter floors (F-PP).
 import { expect, test } from "@playwright/test";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHmac, randomBytes } from "node:crypto";
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { E2E_AUTH_SECRET } from "./e2e-secrets";
@@ -725,5 +727,261 @@ test.describe("expired session denial (F-NN, session-43)", () => {
       dbRead(`(p)=>p.session.findUnique({where:{token:"${TOKEN}"},select:{id:true}})`),
     );
     expect(pruned, "F-NN prune half: the expired row is deleted by the read itself").toBeNull();
+  });
+});
+
+// F-PP (session-45) — the auth limiter floors over the wire. Both auth
+// mutation seams carry the same abuse floor (auth.ts: loginAction's
+// `rateLimit("login:"+ip+":"+email, 10, 15min)`, registerAction's
+// `rateLimit("register:"+ip, 10, 15min)`): the 11th same-key attempt must
+// answer `fail("Too many attempts. Try again in N seconds.")`. Ungated
+// since the limiter's introduction — every existing login/register consume
+// in the suite is lawful and far under 10, so a dropped `if (!limiter.allowed)`
+// block rides every burst through with all gates green (the brute-force /
+// bulk-register silent-abuse class F-OO closed for /api/search).
+//
+// The F-OO harness insight, applied to the auth seam: the burst never
+// touches the shared suite server. The case spawns the SAME standalone
+// artifact as a THROWAWAY process on :3212 against a THROWAWAY COPY of
+// db/e2e.db (the auth actions need working DB reads — the login's user
+// lookup and the register's existing-check must answer envelopes, not raw
+// 500s). The isolated process owns its own module-scope limiter buckets
+// (rate-limit.ts), so the 11+11 burst consumes ZERO of :3100's buckets —
+// the exact pollution that kept these floors carried since session-29.
+//
+// The wire shape (React 19 progressive enhancement, measured in the
+// session-45 probe): the SSR'd form renders `$ACTION_REF_1`, `$ACTION_1:0`
+// = {"id":"<hex>","bound":"$@1"}, `$ACTION_1:1` = "[null]" (the bound
+// prev-state) and `$ACTION_KEY` — a multipart POST carrying those plus the
+// form's own fields invokes the action server-side exactly as a browser
+// without JS does. The login/register manifests expose TWO ids (both
+// pages import both actions via the shared auth-form); the gate
+// discriminates them by response envelope.
+//
+// ZERO logins, ZERO registers, ZERO limiter consumption on the MAIN server;
+// zero DB writes anywhere (the login burst is an unknown email — no
+// session rows; the register burst is an existing email — no user rows; the
+// throwaway copy is deleted with its tmpdir).
+test.describe("auth limiter floors (F-PP, session-45)", () => {
+  const FPP_PORT = 3212;
+  const FPP_BASE = `http://localhost:${FPP_PORT}`;
+  const REPO = process.cwd();
+  const STANDALONE = path.join(REPO, ".next", "standalone", "server.js");
+  const LOGIN_MANIFEST = path.join(
+    REPO,
+    ".next/standalone/.next/server/app/(auth)/login/page/server-reference-manifest.json",
+  );
+  const E2E_DB_FILE = path.join(REPO, "db", "e2e.db");
+
+  const BURST_EMAIL = "fpp-unknown@example.com";
+  const OTHER_EMAIL = "fpp-other@example.com";
+  const EXISTING_EMAIL = "james@example.com"; // exists on the copy (the seed)
+  const PASSWORD = "WrongPassword1234!"; // valid shape for both schemas
+
+  const ENUMERATION_MSG = "Incorrect email or password.";
+  const EXISTS_MSG = "An account with this email already exists.";
+  const ZOD_COPY = "Check the highlighted fields";
+  const FLOOR_RE = /Too many attempts\. Try again in (\d+) seconds/;
+
+  /** The no-JS progressive-enhancement POST (the probe's measured shape). */
+  async function postForm(
+    pagePath: string,
+    actionId: string,
+    fields: Record<string, string>,
+  ): Promise<{ status: number; body: string }> {
+    const fd = new FormData();
+    fd.set("$ACTION_REF_1", "");
+    fd.set("$ACTION_1:0", JSON.stringify({ id: actionId, bound: "$@1" }));
+    fd.set("$ACTION_1:1", "[null]");
+    fd.set("$ACTION_KEY", `kfpp${process.pid.toString(16)}${Date.now().toString(16)}`);
+    for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15_000);
+    try {
+      const res = await fetch(`${FPP_BASE}${pagePath}`, { method: "POST", body: fd, signal: ctrl.signal });
+      return { status: res.status, body: await res.text() };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Read a count through Prisma on the THROWAWAY copy (dbRead's shape). */
+  function copyUserCount(copyUrl: string): number {
+    const script =
+      `const {PrismaClient}=require("@prisma/client");` +
+      `const p=new PrismaClient({datasources:{db:{url:"${copyUrl}"}}});` +
+      `p.user.count().then(c=>{console.log("<<JSON>>"+c);return p.$disconnect()})` +
+      `.catch(e=>{console.error(e.message);process.exit(1)})`;
+    const res = spawnSync("node", ["-e", script], {
+      cwd: REPO,
+      env: { ...process.env, DATABASE_URL: copyUrl },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    if (res.status !== 0) throw new Error(`copyUserCount failed: ${res.stderr?.slice(0, 300)}`);
+    const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+    if (marker < 0) throw new Error(`copyUserCount produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+    return Number(res.stdout.slice(marker + "<<JSON>>".length).trim());
+  }
+
+  test("the 11th same-key attempt on either auth action answers the limiter floor (F-PP)", async () => {
+    test.setTimeout(60_000);
+
+    // The throwaway: a tmpdir holding a COPY of the suite DB + the
+    // standalone on :3212 with its own fresh limiter buckets.
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "aurelia-fpp-"));
+    const copyPath = path.join(tmp, "copy.db");
+    copyFileSync(E2E_DB_FILE, copyPath);
+    const copyUrl = `file:${copyPath}`;
+    const usersBefore = copyUserCount(copyUrl);
+
+    let child: ReturnType<typeof spawn> | null = null;
+    try {
+      child = spawn("node", [STANDALONE], {
+        cwd: REPO,
+        env: {
+          ...process.env,
+          PORT: String(FPP_PORT),
+          NODE_ENV: "production",
+          AUTH_SECRET: E2E_AUTH_SECRET,
+          DATABASE_URL: copyUrl,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stderrTail = "";
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderrTail = (stderrTail + chunk.toString("utf8")).slice(-800);
+      });
+
+      // Boot + listen (the load-bearing feasibility check).
+      const deadline = Date.now() + 25_000;
+      let booted = false;
+      while (Date.now() < deadline) {
+        try {
+          const probe = await fetch(`${FPP_BASE}/api/health`);
+          const text = await probe.text();
+          if (probe.status === 200 && text.includes('"db":true')) {
+            booted = true;
+            break;
+          }
+        } catch { /* not listening yet */ }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      expect(booted, `throwaway must boot against the copy; stderr: ${stderrTail.slice(0, 300)}`).toBe(true);
+
+      // The authoritative id set (the build-shape canary: a Next.js
+      // upgrade that reshapes the manifest fails HERE, loudly).
+      const manifest = JSON.parse(readFileSync(LOGIN_MANIFEST, "utf8")) as { node?: Record<string, unknown> };
+      const ids = Object.keys(manifest.node ?? {});
+      expect(ids, `manifest at ${LOGIN_MANIFEST}`).toHaveLength(2);
+      for (const id of ids) expect(id).toMatch(/^[0-9a-f]{40,}$/);
+
+      // Discriminate: the login shape (unknown email) → the
+      // anti-enumeration envelope identifies loginAction; the same shape
+      // against the sibling fails registerSchema's Zod gate BEFORE its
+      // limiter (confirmPassword absent) — zero register-bucket
+      // consumption. The loginAction probe IS login burst iteration 1
+      // (the bucket key includes the email).
+      let loginId: string | null = null;
+      let registerId: string | null = null;
+      for (const id of ids) {
+        const r = await postForm("/login", id, { email: BURST_EMAIL, password: PASSWORD });
+        if (r.body.includes(ENUMERATION_MSG)) loginId = id;
+        else if (r.body.includes(ZOD_COPY)) registerId = id;
+      }
+      expect(loginId, "one id answers the anti-enumeration envelope").not.toBeNull();
+      expect(registerId, "the sibling answers registerSchema's Zod copy").not.toBeNull();
+      expect(registerId).not.toBe(loginId);
+
+      // The SSR binding canary: the rendered /login form binds the
+      // discriminated loginAction.
+      const html = await (await fetch(`${FPP_BASE}/login`)).text();
+      const bound = [...html.matchAll(/name="\$ACTION_1:0" value="\{&quot;id&quot;:&quot;([0-9a-f]{40,})&quot;/g)].map((m) => m[1]);
+      expect(bound, "exactly one $ACTION_1:0 binding on the rendered login form").toHaveLength(1);
+      expect(bound[0]).toBe(loginId);
+
+      // Register burst iteration 1: the existing-email shape — the register
+      // bucket is per-IP (register:local), so every register post counts.
+      const reg1 = await postForm("/register", registerId!, {
+        email: EXISTING_EMAIL,
+        name: "",
+        password: PASSWORD,
+        confirmPassword: PASSWORD,
+      });
+      expect(reg1.status).toBe(200);
+      expect(reg1.body, "iteration 1 answers the exists envelope").toContain(EXISTS_MSG);
+
+      // LOAD-BEARING 1 (the login floor): iterations 2..10 stay in the
+      // lawful window (the anti-enumeration envelope — the floor must not
+      // fire early), then the 11th same-email attempt hits the floor with
+      // a bounded retry-seconds value. A dropped loginAction limiter block
+      // makes the 11th answer the credential check instead — exactly
+      // where this assertion goes red while every existing gate stays
+      // green (all their consumes are lawful « 10).
+      for (let i = 2; i <= 10; i++) {
+        const r = await postForm("/login", loginId!, { email: BURST_EMAIL, password: PASSWORD });
+        expect(r.status, `login iteration ${i}`).toBe(200);
+        expect(r.body, `login iteration ${i} stays in the lawful window`).toContain(ENUMERATION_MSG);
+        expect(r.body, `login iteration ${i} must not hit the floor early`).not.toMatch(FLOOR_RE);
+      }
+      const floored = await postForm("/login", loginId!, { email: BURST_EMAIL, password: PASSWORD });
+      const floorMatch = FLOOR_RE.exec(floored.body);
+      const floorSeconds = floorMatch ? Number(floorMatch[1]) : 0;
+      expect(floorMatch, "the 11th same-email login answers the floor envelope").not.toBeNull();
+      expect(floorSeconds, "the retry hint is bounded (1..900)").toBeGreaterThanOrEqual(1);
+      expect(floorSeconds, "the retry hint is bounded (1..900)").toBeLessThanOrEqual(900);
+
+      // LOAD-BEARING 2 (the register floor): iterations 2..10 answer the
+      // exists envelope, then the 11th register post hits the floor. A
+      // dropped registerAction limiter block makes the 11th answer the
+      // exists envelope instead — exactly where this goes red.
+      for (let i = 2; i <= 10; i++) {
+        const r = await postForm("/register", registerId!, {
+          email: EXISTING_EMAIL,
+          name: "",
+          password: PASSWORD,
+          confirmPassword: PASSWORD,
+        });
+        expect(r.status, `register iteration ${i}`).toBe(200);
+        expect(r.body, `register iteration ${i} stays in the lawful window`).toContain(EXISTS_MSG);
+        expect(r.body, `register iteration ${i} must not hit the floor early`).not.toMatch(FLOOR_RE);
+      }
+      const regFloored = await postForm("/register", registerId!, {
+        email: EXISTING_EMAIL,
+        name: "",
+        password: PASSWORD,
+        confirmPassword: PASSWORD,
+      });
+      const regFloorMatch = FLOOR_RE.exec(regFloored.body);
+      const regFloorSeconds = regFloorMatch ? Number(regFloorMatch[1]) : 0;
+      expect(regFloorMatch, "the 11th register answers the floor envelope").not.toBeNull();
+      expect(regFloorSeconds, "the retry hint is bounded (1..900)").toBeGreaterThanOrEqual(1);
+      expect(regFloorSeconds, "the retry hint is bounded (1..900)").toBeLessThanOrEqual(900);
+
+      // The per-bucket control: a DIFFERENT email's login is NOT floored —
+      // the bucket key includes the email, so the floor is per-target,
+      // not a global lockout.
+      const control = await postForm("/login", loginId!, { email: OTHER_EMAIL, password: PASSWORD });
+      expect(control.body, "a different email is not floored").toContain(ENUMERATION_MSG);
+      expect(control.body, "the floor must not leak across bucket keys").not.toMatch(FLOOR_RE);
+
+      // The zero-writes proof (server truth the wire cannot see): the
+      // burst created no users on the throwaway copy. The main e2e.db was
+      // never written (only read once, at copyFileSync).
+      const usersAfter = copyUserCount(copyUrl);
+      expect(usersAfter, "the whole ladder persisted nothing").toBe(usersBefore);
+    } finally {
+      if (child) {
+        const force = setTimeout(() => child?.kill("SIGKILL"), 5_000);
+        const exited = new Promise<void>((resolve) => {
+          const c = child;
+          if (c) c.on("exit", () => resolve());
+        });
+        child.kill("SIGTERM");
+        await exited;
+        clearTimeout(force);
+      }
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
