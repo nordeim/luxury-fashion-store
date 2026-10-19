@@ -7,7 +7,7 @@
 // (H-2/H-39) — never a login. Failed attempts also consume the bucket.
 import { execSync, spawnSync } from "node:child_process";
 import path from "node:path";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { createHmac, randomBytes } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { E2E_AUTH_SECRET } from "./e2e-secrets";
@@ -610,5 +610,347 @@ test.describe("low-stock KPI read (F-LL, session-41)", () => {
     await expect(panel).toBeVisible();
     await expect(panel.locator("..")).toContainText("3 or fewer remaining");
     await expect(panel.locator("..")).toContainText("F-LL Pin 01");
+  });
+});
+
+// F-SS (session-48): the admin seam's role walls + field-validation gates.
+// Every OTHER describe in this file drives the POSITIVE paths through an
+// admin session (the canonical storageState or an offline mint) — no spec
+// anywhere posts either admin action WITHOUT an admin session. A dropped
+// `if (!admin) return fail("Admin access required.")` lets any signed-in
+// customer flip order status + mint FORGED actor:"admin" OrderEvent rows
+// into other users' customer-visible timelines (order-integrity +
+// timeline-forgery class), zero/explode any product's stock, or
+// isActive:false-hide any product (catalog sabotage) — with every existing
+// case green. The /admin PAGE redirect guards the render, not the action
+// dispatch (the proxy is CSP-only — verified). Wire-blindness proven by the
+// mutation demos: all existing cases GREEN while exactly the 2 F-SS runs
+// fail. Request-level throughout (the F-RR shape): Node fetch with explicit
+// Cookie headers; the projects' storageState never rides the probes.
+test.describe("admin seam role walls + field gates (F-SS, session-48)", () => {
+  const REPO = process.cwd(); // Trap #13: cwd-based paths (CJS loader).
+  const SCHEMA = path.join(REPO, "prisma", "schema.prisma");
+  const E2E_DB_URL = `file:${path.join(REPO, "db", "e2e.db")}`;
+  const SQL_SCRATCH = path.join(REPO, "tests", "e2e", ".f-ss-fixture.sql");
+  const PRODUCTS_MANIFEST = path.join(
+    REPO,
+    ".next/standalone/.next/server/app/(storefront)/admin/products/page/server-reference-manifest.json",
+  );
+  const ORDERS_MANIFEST = path.join(
+    REPO,
+    ".next/standalone/.next/server/app/(storefront)/admin/orders/page/server-reference-manifest.json",
+  );
+  // Mirror the config's port resolution (the F-RR BASE_URL note).
+  const BASE_URL = `http://localhost:${Number(process.env.E2E_PORT ?? 3100)}`;
+
+  // Per-worker mint identity (the F-RR pattern): each device project's
+  // worker mints its own session rows (delete-then-insert is idempotent;
+  // the serial topology keeps the windows non-overlapping).
+  const SUFFIX = randomBytes(6).toString("hex");
+  const CUST_TOKEN = `fss-cust-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const ADMIN_TOKEN = `fss-admin-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const CUST_COOKIE = `${CUST_TOKEN}.${createHmac("sha256", E2E_AUTH_SECRET).update(CUST_TOKEN).digest("base64url")}`;
+  const ADMIN_COOKIE = `${ADMIN_TOKEN}.${createHmac("sha256", E2E_AUTH_SECRET).update(ADMIN_TOKEN).digest("base64url")}`;
+
+  const ADMIN_REQUIRED_MSG = "Admin access required.";
+  const FIELDS_MSG = "Check the highlighted fields.";
+  const NO_PRODUCT_MSG = "That piece no longer exists.";
+  const NO_ORDER_MSG = "That order no longer exists.";
+  // The control product: a canonical seed product NO other stock-writing
+  // spec touches (H-7 writes wide-brim-felt-hat; the checkout flows write
+  // silk-draped-evening-gown / wide-brim-felt-hat; F-LL's pins are
+  // slug-prefix-scoped and afterAll-deleted). Seed orders only READ it.
+  const CONTROL_SLUG = "leather-crossbody-bag";
+  const CONTROL_STOCK = 77;
+
+  /** Read rows through Prisma on the E2E DB (the F-II/F-KK/F-NN helper's shape). */
+  function dbRead(jsonExpression: string): string {
+    const script = `const {PrismaClient}=require("@prisma/client");const p=new PrismaClient({datasources:{db:{url:"${E2E_DB_URL}"}}});(${jsonExpression})(p).then(r=>{console.log("<<JSON>>"+JSON.stringify(r));return p.$disconnect()}).catch(e=>{console.error(e.message);process.exit(1)})`;
+    const res = spawnSync("node", ["-e", script], {
+      cwd: REPO,
+      env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    if (res.status !== 0) throw new Error(`dbRead failed: ${res.stderr?.slice(0, 300)}`);
+    const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+    if (marker < 0) throw new Error(`dbRead produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+    return res.stdout.slice(marker + "<<JSON>>".length).trim();
+  }
+
+  /** SQL fixture helper — the established `prisma db execute` pattern (H-2/M-1). */
+  function sqlRun(sql: string): void {
+    writeFileSync(SQL_SCRATCH, sql);
+    try {
+      const res = spawnSync(
+        "npx",
+        ["prisma", "db", "execute", "--schema", SCHEMA, "--file", SQL_SCRATCH],
+        {
+          cwd: REPO,
+          env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+        },
+      );
+      if (res.status !== 0) throw new Error(`sqlRun failed: ${res.stderr?.slice(0, 300)}`);
+    } finally {
+      try { unlinkSync(SQL_SCRATCH); } catch { /* already gone */ }
+    }
+  }
+
+  /** The F-QQ multipart fetch-action shape (both admin actions are
+   * `(_prev, formData)` forms): the `_1_*` fields MUST precede the flight
+   * row "0" = [null,"$K1"] (the session-46 wire-order discovery). */
+  async function postFormAction(
+    route: string,
+    actionId: string,
+    fields: Record<string, string>,
+    cookie?: string,
+  ): Promise<{ status: number; body: string }> {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(fields)) fd.set(`_1_${k}`, v);
+    fd.set("0", '[null,"$K1"]');
+    const res = await fetch(`${BASE_URL}${route}`, {
+      method: "POST",
+      headers: {
+        "Next-Action": actionId,
+        ...(cookie ? { Cookie: `aurelia_session=${cookie}` } : {}),
+      },
+      body: fd,
+      signal: AbortSignal.timeout(15_000),
+    });
+    return { status: res.status, body: await res.text() };
+  }
+
+  test.beforeAll(() => {
+    // The mints (the F-NN/F-HH offline pattern, idempotent delete-then-
+    // insert; INSERT..SELECT the userId by email — never hardcoded):
+    // (a) james's CUSTOMER session — the hostile-craft caller, ZERO logins;
+    // (b) the ADMIN session — the field-validation + control caller.
+    sqlRun(
+      `DELETE FROM "Session" WHERE token IN ('${CUST_TOKEN}', '${ADMIN_TOKEN}');\n` +
+        `INSERT INTO "Session" (id, token, "userId", "expiresAt", "createdAt") ` +
+        `SELECT 'fss-cust-${SUFFIX}', '${CUST_TOKEN}', id, datetime('now', '+1 day'), datetime('now') ` +
+        `FROM "User" WHERE email = 'james@example.com';\n` +
+        `INSERT INTO "Session" (id, token, "userId", "expiresAt", "createdAt") ` +
+        `SELECT 'fss-admin-${SUFFIX}', '${ADMIN_TOKEN}', id, datetime('now', '+1 day'), datetime('now') ` +
+        `FROM "User" WHERE email = 'admin@aurelia.com';`,
+    );
+  });
+
+  test.afterAll(() => {
+    // Idempotent prefix-scoped cleanup (global-setup's session wipe is the
+    // belt and braces for the session rows).
+    sqlRun(`DELETE FROM "Session" WHERE token IN ('${CUST_TOKEN}', '${ADMIN_TOKEN}');`);
+  });
+
+  /** SQL string literal escape (the F-II/F-JJ restore precedent). */
+  const sqlStr = (v: string | null): string =>
+    v === null ? "NULL" : `'${v.replace(/'/g, "''")}'`;
+
+  test("the admin actions' role walls deny a customer's crafted wire calls; the field gates hold; the admin controls write (F-SS)", async () => {
+    test.setTimeout(90_000);
+
+    // --- the manifest canary (the build-shape gate) ---
+    const prodEntries = Object.entries(
+      (JSON.parse(readFileSync(PRODUCTS_MANIFEST, "utf8")) as {
+        node: Record<string, { exportedName?: string }>;
+      }).node ?? {},
+    );
+    const ordEntries = Object.entries(
+      (JSON.parse(readFileSync(ORDERS_MANIFEST, "utf8")) as {
+        node: Record<string, { exportedName?: string }>;
+      }).node ?? {},
+    );
+    expect(prodEntries.length, `manifest at ${PRODUCTS_MANIFEST}`).toBe(3);
+    expect(ordEntries.length, `manifest at ${ORDERS_MANIFEST}`).toBe(3);
+    for (const [id] of [...prodEntries, ...ordEntries]) expect(id).toMatch(/^[0-9a-f]{40,}$/);
+    const prodId = prodEntries.filter(([, v]) => v.exportedName === "adminUpdateProductAction").map(([id]) => id);
+    const ordId = ordEntries.filter(([, v]) => v.exportedName === "adminUpdateOrderAction").map(([id]) => id);
+    expect(prodId, "exactly one adminUpdateProductAction").toHaveLength(1);
+    expect(ordId, "exactly one adminUpdateOrderAction").toHaveLength(1);
+    const productAction = prodId[0];
+    const orderAction = ordId[0];
+
+    // --- runtime-resolved canonical targets (never hardcoded rowids) ---
+    const product = JSON.parse(
+      dbRead(`(p)=>p.product.findUnique({where:{slug:"${CONTROL_SLUG}"},select:{id:true,stock:true,isActive:true}})`),
+    ) as { id: string; stock: number; isActive: boolean };
+    const order = JSON.parse(
+      dbRead(`(p)=>p.order.findFirst({orderBy:{placedAt:"asc"},select:{id:true,number:true,status:true}})`),
+    ) as { id: string; number: string; status: string };
+    expect(product?.id, "the control product exists").toBeTruthy();
+    expect(order?.id, "the canonical order exists").toBeTruthy();
+    const eventsBefore = Number(
+      JSON.parse(dbRead(`(p)=>p.orderEvent.count({where:{orderId:"${order.id}"}})`)),
+    );
+    // Capture the order's carrier/trackingNumber too — the demo hygiene
+    // contract (F-HH): the finally restores every captured field regardless
+    // of how the case ends.
+    const orderSnapshot = JSON.parse(
+      dbRead(`(p)=>p.order.findUnique({where:{id:"${order.id}"},select:{status:true,carrier:true,trackingNumber:true}})`),
+    ) as { status: string; carrier: string | null; trackingNumber: string | null };
+    // The hostile status must DIFFER from the current one — a dropped role
+    // wall then flips the status AND mints a forged event (the full harm).
+    const hostileStatus =
+      order.status === "cancelled" ? "processing" : "cancelled";
+
+    try {
+      // --- the unauthenticated fail-closed half (cookie-less) ---
+      for (const [label, route, id, fields] of [
+        ["product", "/admin/products", productAction, { productId: product.id, stock: "1" }],
+        ["order", "/admin/orders", orderAction, { orderId: order.id, status: hostileStatus }],
+      ] as const) {
+        const r = await postFormAction(route, id, fields);
+        expect(r.status, `${label}: action errors are envelopes, never 5xx`).toBe(200);
+        expect(r.body).not.toContain("Internal Server Error");
+        expect(r.body, `${label}: the role wall fires first`).toContain(ADMIN_REQUIRED_MSG);
+      }
+
+      // --- LB1 (the role walls): the CUSTOMER session's hostile crafts ---
+      const hostileProd = await postFormAction(
+        "/admin/products",
+        productAction,
+        { productId: product.id, stock: "1" },
+        CUST_COOKIE,
+      );
+      expect(hostileProd.status).toBe(200);
+      expect(hostileProd.body, "the product role wall answers the admin envelope").toContain(ADMIN_REQUIRED_MSG);
+      expect(hostileProd.body).toContain('"ok":false');
+      const hostileOrd = await postFormAction(
+        "/admin/orders",
+        orderAction,
+        { orderId: order.id, status: hostileStatus },
+        CUST_COOKIE,
+      );
+      expect(hostileOrd.status).toBe(200);
+      expect(hostileOrd.body, "the order role wall answers the admin envelope").toContain(ADMIN_REQUIRED_MSG);
+      expect(hostileOrd.body).toContain('"ok":false');
+
+      // Server-truth: both rows survive the hostile ladder byte-identical
+      // (the harm class is server-truth-only — a dropped wall shows up
+      // HERE, not in any UI).
+      const prodAfterHostile = JSON.parse(
+        dbRead(`(p)=>p.product.findUnique({where:{id:"${product.id}"},select:{stock:true,isActive:true}})`),
+      ) as { stock: number; isActive: boolean };
+      const ordAfterHostile = JSON.parse(
+        dbRead(`(p)=>p.order.findUnique({where:{id:"${order.id}"},select:{status:true,carrier:true,trackingNumber:true}})`),
+      ) as { status: string; carrier: string | null; trackingNumber: string | null };
+      expect(prodAfterHostile.stock, "the hostile product craft never wrote stock").toBe(product.stock);
+      expect(prodAfterHostile.isActive, "the hostile product craft never flipped visibility").toBe(product.isActive);
+      expect(ordAfterHostile.status, "the hostile order craft never flipped status").toBe(order.status);
+      const eventsAfterHostile = Number(
+        JSON.parse(dbRead(`(p)=>p.orderEvent.count({where:{orderId:"${order.id}"}})`)),
+      );
+      expect(eventsAfterHostile, "the hostile order craft minted zero forged events").toBe(eventsBefore);
+
+      // --- LB2 (the field/existence walls): the ADMIN session's invalid crafts ---
+      for (const badStock of ["-1", "1000", "1.5", "abc"]) {
+        const r = await postFormAction(
+          "/admin/products",
+          productAction,
+          { productId: product.id, stock: badStock },
+          ADMIN_COOKIE,
+        );
+        expect(r.status, `stock=${badStock}: envelopes, never 5xx`).toBe(200);
+        expect(r.body, `stock=${badStock}: the Zod bounds reject it`).toContain(FIELDS_MSG);
+        expect(r.body).toContain('"ok":false');
+      }
+      const badStatus = await postFormAction(
+        "/admin/orders",
+        orderAction,
+        { orderId: order.id, status: "banana" },
+        ADMIN_COOKIE,
+      );
+      expect(badStatus.status).toBe(200);
+      expect(badStatus.body, "the status enum rejects a non-member").toContain(FIELDS_MSG);
+      expect(badStatus.body).toContain('"ok":false');
+      const noProduct = await postFormAction(
+        "/admin/products",
+        productAction,
+        { productId: `fss-nonexistent-${SUFFIX}`, stock: "5" },
+        ADMIN_COOKIE,
+      );
+      expect(noProduct.status).toBe(200);
+      expect(noProduct.body, "the product existence wall answers").toContain(NO_PRODUCT_MSG);
+      expect(noProduct.body).toContain('"ok":false');
+      const noOrder = await postFormAction(
+        "/admin/orders",
+        orderAction,
+        { orderId: `fss-nonexistent-${SUFFIX}` },
+        ADMIN_COOKIE,
+      );
+      expect(noOrder.status).toBe(200);
+      expect(noOrder.body, "the order existence wall answers").toContain(NO_ORDER_MSG);
+      expect(noOrder.body).toContain('"ok":false');
+
+      // Server-truth: the invalid ladder wrote nothing.
+      const prodAfterBad = JSON.parse(
+        dbRead(`(p)=>p.product.findUnique({where:{id:"${product.id}"},select:{stock:true,isActive:true}})`),
+      ) as { stock: number; isActive: boolean };
+      expect(prodAfterBad.stock).toBe(product.stock);
+      expect(prodAfterBad.isActive).toBe(product.isActive);
+      const eventsAfterBad = Number(
+        JSON.parse(dbRead(`(p)=>p.orderEvent.count({where:{orderId:"${order.id}"}})`)),
+      );
+      expect(eventsAfterBad).toBe(eventsBefore);
+
+      // --- LB3 (the controls — the false-positive guards): the ADMIN
+      // session's LAWFUL crafts prove the mint + wire shape reach the DB;
+      // the LB1/LB2 denials are the ROLE/ZOD walls, not a broken harness ---
+      const controlProd = await postFormAction(
+        "/admin/products",
+        productAction,
+        { productId: product.id, stock: String(CONTROL_STOCK) },
+        ADMIN_COOKIE,
+      );
+      expect(controlProd.status).toBe(200);
+      expect(controlProd.body).toContain('"ok":true');
+      const prodAfterControl = JSON.parse(
+        dbRead(`(p)=>p.product.findUnique({where:{id:"${product.id}"},select:{stock:true}})`),
+      ) as { stock: number };
+      expect(prodAfterControl.stock, "the admin's lawful craft WROTE server-truth").toBe(CONTROL_STOCK);
+      // The order action's ZERO-WRITE lawful shape: the CURRENT status →
+      // the transaction writes nothing, no events minted.
+      const controlOrd = await postFormAction(
+        "/admin/orders",
+        orderAction,
+        { orderId: order.id, status: order.status },
+        ADMIN_COOKIE,
+      );
+      expect(controlOrd.status).toBe(200);
+      expect(controlOrd.body).toContain('"ok":true');
+      const eventsAfterControl = Number(
+        JSON.parse(dbRead(`(p)=>p.orderEvent.count({where:{orderId:"${order.id}"}})`)),
+      );
+      expect(eventsAfterControl, "the current-status control minted zero events").toBe(eventsBefore);
+    } finally {
+      // The shared-DB discipline (the H-7/F-HH try/finally patterns):
+      // restore EVERY captured field byte-identically regardless of
+      // outcome — the control product's stock, and the order's status +
+      // any events minted beyond the baseline count (a mutation demo's
+      // dropped wall writes here; the restore keeps the demo hygienic).
+      sqlRun(`UPDATE "Product" SET stock = ${product.stock} WHERE id = '${product.id}';`);
+      const excess =
+        Number(JSON.parse(dbRead(`(p)=>p.orderEvent.count({where:{orderId:"${order.id}"}})`))) -
+        eventsBefore;
+      if (excess > 0) {
+        sqlRun(
+          `DELETE FROM "OrderEvent" WHERE rowid IN (SELECT rowid FROM "OrderEvent" WHERE "orderId" = '${order.id}' ORDER BY rowid DESC LIMIT ${excess});`,
+        );
+      }
+      const carrierSql = sqlStr(orderSnapshot.carrier);
+      const trackingSql = sqlStr(orderSnapshot.trackingNumber);
+      sqlRun(
+        `UPDATE "Order" SET status = '${orderSnapshot.status}', carrier = ${carrierSql}, "trackingNumber" = ${trackingSql} WHERE id = '${order.id}';`,
+      );
+    }
+
+    // --- the final delta: the control product back byte-identical ---
+    const prodFinal = JSON.parse(
+      dbRead(`(p)=>p.product.findUnique({where:{id:"${product.id}"},select:{stock:true,isActive:true}})`),
+    ) as { stock: number; isActive: boolean };
+    expect(prodFinal.stock).toBe(product.stock);
+    expect(prodFinal.isActive).toBe(product.isActive);
   });
 });
