@@ -511,3 +511,217 @@ test.describe("cart-line user-ownership walls (F-UU, session-50)", () => {
     expect(victimFinal!.size).toBe(victimBefore!.size);
   });
 });
+
+// F-WW (session-52) — the bag-add seam's availability + clamp walls, the
+// F-TT lineage's last ungated reach. addToCartAction's guard
+// (src/lib/actions/cart.ts:57-60) reads `if (!product || !product.isActive)`
+// — the census above probes only a NONEXISTENT id (the `!product` branch);
+// the isActive half (a DEACTIVATED product — the admin's H-7 visibility
+// toggle — driven over the wire from a stale tab or a crafted POST) never
+// fires in any gate. And the add-path stock clamp (clampToStock, :24-27 +
+// :96/:99) is equally wire-blind: cartAddSchema allows quantity ≤ 99, the
+// UI stepper caps at stock, so no existing spec ever drives an add ABOVE
+// stock — a dropped clamp lands a 99-quantity line on a stock-12 product
+// (the unplaceable-bag exposure; the checkout guard would reject the whole
+// placement later at the cost of a broken bag state the session-3/5 clamp
+// lineage exists to prevent). getCartDto has NO isActive filter, so a
+// deactivated line would render in the drawer + cart page with live money
+// math — the bag-side visibility contract F-TT closed for the wishlist.
+//
+// The wire shape: the census's JSON-arg craft on PLAIN Node fetch
+// (cookie-less — the F-UU/F-VV wire fact: Playwright request contexts ride
+// storageState; plain fetch attaches nothing). The wall fires BEFORE
+// getOrCreateCart (cart.ts:57-60 precedes :71), so a rejected craft mints
+// NO cart cookie — asserted. The clamp craft MINTS a guest cart; its
+// Set-Cookie token identifies the craft's own line for the server-truth
+// read (the fixture products carry no other rows in this describe's
+// window). Budget: addToCartAction carries NO limiter (the rate-limited
+// set is login/register/newsletter/checkout/search); zero logins, zero
+// registers, zero storageState pollution. The fixture products live only
+// for this file's run (slug-prefixed, run-unique per worker; afterAll
+// deletes them before any page-rendering spec — the suite's alphabetical
+// file order runs action-seam before admin/home/shop).
+test.describe("bag-add availability + clamp walls (F-WW, session-52)", () => {
+  const E2E_DB_URL = `file:${path.join(REPO, "db", "e2e.db")}`;
+  const SQL_SCRATCH = path.join(REPO, "tests", "e2e", ".f-ww-fixture.sql");
+
+  // Per-worker mint identity (the F-RR/F-UU shape): each device project's
+  // worker mints its own fixture rows — delete-then-insert is idempotent;
+  // afterAll cleans each set (module state is per worker process).
+  const SUFFIX = randomBytes(6).toString("hex");
+  const INACTIVE_SLUG = `fww-${SUFFIX}-inactive`;
+  const CLAMP_SLUG = `fww-${SUFFIX}-clamp`;
+  const STOCK = 5; // the fixture stock (S) — read back at runtime, never trusted
+
+  interface FixtureProduct {
+    id: string;
+    stock: number;
+    isActive: boolean;
+  }
+  let inactive: FixtureProduct;
+  let clamp: FixtureProduct;
+
+  /** SQL fixture helper — the established `prisma db execute` pattern (H-2/M-1). */
+  function sqlRun(sql: string): void {
+    writeFileSync(SQL_SCRATCH, sql);
+    try {
+      const res = spawnSync(
+        "npx",
+        ["prisma", "db", "execute", "--schema", path.join(REPO, "prisma", "schema.prisma"), "--file", SQL_SCRATCH],
+        {
+          cwd: REPO,
+          env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+        },
+      );
+      if (res.status !== 0) throw new Error(`sqlRun failed: ${res.stderr?.slice(0, 300)}`);
+    } finally {
+      try { unlinkSync(SQL_SCRATCH); } catch { /* already gone */ }
+    }
+  }
+
+  /** Read rows through Prisma on the E2E DB (the F-II/F-KK/F-NN helper's shape). */
+  function dbRead(jsonExpression: string): string {
+    const script = `const {PrismaClient}=require("@prisma/client");const p=new PrismaClient({datasources:{db:{url:"${E2E_DB_URL}"}}});(${jsonExpression})(p).then(r=>{console.log("<<JSON>>"+JSON.stringify(r));return p.$disconnect()}).catch(e=>{console.error(e.message);process.exit(1)})`;
+    const res = spawnSync("node", ["-e", script], {
+      cwd: REPO,
+      env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    if (res.status !== 0) throw new Error(`dbRead failed: ${res.stderr?.slice(0, 300)}`);
+    const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+    if (marker < 0) throw new Error(`dbRead produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+    return res.stdout.slice(marker + "<<JSON>>".length).trim();
+  }
+
+  /** The census's JSON-arg craft on PLAIN Node fetch — cookie-less (GUEST). */
+  async function postJsonAction(
+    actionId: string,
+    payload: unknown[],
+  ): Promise<{ status: number; body: string; setCookies: string[] }> {
+    const res = await fetch(`${BASE_URL}${PDP_PATH}`, {
+      method: "POST",
+      headers: { "Next-Action": actionId, "Content-Type": "text/plain;charset=UTF-8" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15_000),
+    });
+    return { status: res.status, body: await res.text(), setCookies: res.headers.getSetCookie?.() ?? [] };
+  }
+
+  /** Manifest entries with exportedName metadata (the F-UU/F-QQ canary shape). */
+  function manifestEntries(): { id: string; exportedName?: string; filename?: string }[] {
+    const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8")) as {
+      node?: Record<string, { exportedName?: string; filename?: string }>;
+    };
+    return Object.entries(manifest.node ?? {}).map(([id, v]) => ({
+      id,
+      exportedName: v?.exportedName,
+      filename: v?.filename,
+    }));
+  }
+
+  test.beforeAll(() => {
+    // The fixture products (F-LL's INSERT shape: categoryId by scalar
+    // subquery — never hardcoded; sizes '[]' so sizeAllowed stays
+    // unconstrained per its documented empty-list rule; updatedAt passed
+    // explicitly — @updatedAt has no DB default).
+    const row = (slug: string, isActive: boolean) =>
+      `INSERT INTO "Product" ("id","slug","name","brand","description","price","categoryId","subcategory","sortOrder","stock","isActive","createdAt","updatedAt") ` +
+      `VALUES ('${slug}','${slug}','FWW Fixture ${slug}','E2E','F-WW fixture row',100,` +
+      `(SELECT "id" FROM "Category" WHERE "slug"='accessories' LIMIT 1),'hats',2001,${STOCK},${isActive ? 1 : 0},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);`;
+    sqlRun(
+      `DELETE FROM "Product" WHERE "slug" IN ('${INACTIVE_SLUG}','${CLAMP_SLUG}');\n` +
+        row(INACTIVE_SLUG, false) + "\n" +
+        row(CLAMP_SLUG, true) + "\n",
+    );
+    inactive = JSON.parse(
+      dbRead(`(p)=>p.product.findUnique({where:{slug:"${INACTIVE_SLUG}"},select:{id:true,stock:true,isActive:true}})`),
+    );
+    clamp = JSON.parse(
+      dbRead(`(p)=>p.product.findUnique({where:{slug:"${CLAMP_SLUG}"},select:{id:true,stock:true,isActive:true}})`),
+    );
+    expect(inactive?.id, "the deactivated fixture must exist").toBeTruthy();
+    expect(clamp?.id, "the clamp fixture must exist").toBeTruthy();
+    expect(inactive.isActive, "the deactivated fixture is INACTIVE").toBe(false);
+    expect(clamp.isActive, "the clamp fixture is ACTIVE").toBe(true);
+    expect(clamp.stock, "the clamp fixture's captured stock").toBe(STOCK);
+  });
+
+  test.afterAll(() => {
+    // Idempotent, id-scoped cleanup in FK order. The clamp craft's orphan
+    // guest cart is captured by RELATION FILTER (robust even if the case
+    // failed before the token capture): items first, then the cart, then
+    // the fixture products.
+    const orphanCarts = JSON.parse(
+      dbRead(
+        `(p)=>p.cart.findMany({where:{items:{some:{product:{is:{slug:{in:["${INACTIVE_SLUG}","${CLAMP_SLUG}"]}}}}}},select:{id:true}})`,
+      ),
+    ) as { id: string }[];
+    const cartIds = orphanCarts.map((c) => `'${c.id}'`).join(",");
+    sqlRun(
+      `DELETE FROM "CartItem" WHERE "productId" IN (SELECT "id" FROM "Product" WHERE "slug" IN ('${INACTIVE_SLUG}','${CLAMP_SLUG}'));\n` +
+        (cartIds ? `DELETE FROM "Cart" WHERE "id" IN (${cartIds});\n` : "") +
+        `DELETE FROM "Product" WHERE "slug" IN ('${INACTIVE_SLUG}','${CLAMP_SLUG}');`,
+    );
+  });
+
+  test("a deactivated product cannot be bagged over the wire; an over-stock add lands CLAMPED (F-WW)", async () => {
+    // The build-shape canary + the exportedName discrimination (the F-UU
+    // shape — the authoritative id set for the PDP route).
+    const entries = manifestEntries();
+    expect(entries, `manifest at ${MANIFEST_PATH}`).toHaveLength(4);
+    for (const { id } of entries) expect(id).toMatch(/^[0-9a-f]{40,}$/);
+    const add = entries.filter(
+      (e) => e.exportedName === "addToCartAction" && e.filename === "src/lib/actions/cart.ts",
+    );
+    expect(add, "exactly one addToCartAction on the PDP route").toHaveLength(1);
+    const addActionId = add[0].id;
+
+    // --- step 1 (the isActive wall): the DEACTIVATED fixture craft --------
+    // The baseline: no other row may sit on the fixture product (the
+    // fixture's own window is this describe alone — a delta assertion).
+    const inactiveRowsBefore = Number(
+      dbRead(`(p)=>p.cartItem.count({where:{productId:"${inactive.id}"}})`),
+    );
+    const wallCraft = await postJsonAction(addActionId, [inactive.id, "M", 1]);
+    expect(wallCraft.status, "action errors are envelopes, never 5xx").toBe(200);
+    expect(wallCraft.body, "the availability wall fired (the isActive half)").toContain(NOT_FOUND_MSG);
+    expect(wallCraft.body).toContain('"ok":false');
+    expect(
+      wallCraft.setCookies.some((c) => c.startsWith("aurelia_cart=")),
+      "the wall fires BEFORE getOrCreateCart — no cart minted",
+    ).toBe(false);
+    const inactiveRowsAfter = Number(
+      dbRead(`(p)=>p.cartItem.count({where:{productId:"${inactive.id}"}})`),
+    );
+    expect(inactiveRowsAfter, "the deactivated craft persisted NOTHING").toBe(inactiveRowsBefore);
+
+    // --- step 2 (the add-path stock clamp): the 99-quantity craft --------
+    // 99 is the Zod max (cartAddSchema) — the largest lawful demand, far
+    // above the fixture's stock. The line must land CLAMPED at exactly the
+    // captured stock (the F-13 invariant's add-path half).
+    const clampCraft = await postJsonAction(addActionId, [clamp.id, "M", 99]);
+    expect(clampCraft.status).toBe(200);
+    expect(clampCraft.body, "the over-stock add SUCCEEDS (clamped, never rejected)").toContain('"ok":true');
+    const clampCookie = clampCraft.setCookies.find((c) => c.startsWith("aurelia_cart="));
+    expect(clampCookie, "the guest craft mints the cart cookie").toBeTruthy();
+    const clampToken = clampCookie?.match(/aurelia_cart=([^;]+)/)?.[1];
+    expect(clampToken).toBeTruthy();
+
+    // The craft's OWN line (by its minted cart token — the only rows on the
+    // fixture product in this window, but scoped precisely anyway).
+    const clampLine = JSON.parse(
+      dbRead(
+        `(p)=>p.cartItem.findFirst({where:{productId:"${clamp.id}",cart:{token:"${clampToken}"}},select:{quantity:true}})`,
+      ),
+    ) as { quantity: number } | null;
+    expect(clampLine, "the clamped line landed server-truth").toBeTruthy();
+    expect(clampLine!.quantity, "the quantity is CLAMPED at the captured stock").toBe(clamp.stock);
+
+    // The response DTO carries the clamped quantity — the client store
+    // re-syncs from it (the drawer renders server truth, not the demand).
+    expect(clampCraft.body, "the DTO's quantity is the clamped stock").toContain(`"quantity":${clamp.stock}`);
+  });
+});

@@ -1233,3 +1233,264 @@ test.describe("guest cart merge contract (F-VV, session-51)", () => {
       "the register door cleared the cart cookie on the wire").toBe(true);
   });
 });
+
+// F-WW (session-52) — the checkout seam's stock/visibility guard, the
+// oversell invariant's LAST line of defense, wire-blind since session-3.
+// placeOnce's per-item re-read + three-term guard
+// (src/lib/actions/checkout.ts:142-154):
+//   if (!fresh || !fresh.isActive || fresh.stock < item.quantity)
+//     throw new Error(`STOCK_SHORT:${item.productId}`)
+// answers the customer-safe envelope ("A piece in your bag just sold out.
+// Please review your bag.") and unwinds the WHOLE transaction — grep
+// STOCK_SHORT across tests/ has ZERO hits: F-MM pins the SUCCESS path's
+// write set (the decrement, the placed event, the purge) and never the
+// FAILURE path. A dropped stock term decrements BELOW ZERO and lands the
+// order on inventory that never existed (the oversell the guard exists to
+// reject — every existing placement flows a lawful stock-12 line so every
+// gate stays green under the drop); a dropped isActive term SELLS a bag
+// line on a deactivated product (the admin's visibility decision silently
+// overridden one layer deeper than F-TT closed); a "helpful" unconditional
+// purge would empty the customer's bag on a REJECTED placement (the
+// rollback's no-purge half).
+//
+// The gate runs on a THROWAWAY healthy-copy standalone on :3210 (the F-QQ
+// crib — a tmpdir COPY of db/e2e.db, the standalone spawned against the
+// copy, killed + removed in the finally): ZERO consumption of :3100's
+// shared checkout-limiter bucket (8/10 stands unchanged; the copy's
+// process owns fresh buckets — 2 crafts < 10), zero writes to db/e2e.db
+// (read once at copyFileSync). The wire shape is F-QQ's measured
+// fetch-action multipart (the `_1_*` form fields PRECEDE the flight row
+// "0" = [null,"$K1"] — the server's ordered referencedEntries walk breaks
+// at the first non-matching key) + an EXPLICIT aurelia_cart Cookie header
+// (the F-RR/F-VV wire fact — plain Node fetch, no jar).
+test.describe("checkout stock/visibility guard (F-WW, session-52)", () => {
+  const FWW_PORT = 3210;
+  const FWW_BASE = `http://localhost:${FWW_PORT}`;
+  const REPO = process.cwd();
+  const STANDALONE = path.join(REPO, ".next", "standalone", "server.js");
+  const CHECKOUT_MANIFEST = path.join(
+    REPO,
+    ".next/standalone/.next/server/app/(storefront)/checkout/page/server-reference-manifest.json",
+  );
+  const E2E_DB_FILE = path.join(REPO, "db", "e2e.db");
+
+  const SUFFIX = randomBytes(6).toString("hex");
+  const INACTIVE_SLUG = `fww-${SUFFIX}-inactive`;
+  const CLAMP_SLUG = `fww-${SUFFIX}-clamp`;
+  const STOCK = 5; // the fixture stock — the clamp/oversell fixture value
+  const CART_A_TOKEN = `fww-ta-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const CART_B_TOKEN = `fww-tb-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const LINE_A_ID = `fww-ia-${SUFFIX}`; // cart A's over-stock line (qty 99)
+  const LINE_B_ID = `fww-ib-${SUFFIX}`; // cart B's deactivated line (qty 1)
+
+  const SOLD_OUT_MSG = "A piece in your bag just sold out. Please review your bag.";
+
+  const COD_PAYLOAD = {
+    email: `fww-guard-${process.pid}@example.com`,
+    fullName: "FWW Guard Probe",
+    street: "1 Probe Lane",
+    city: "Probe City",
+    state: "Probe State",
+    zip: "12345",
+    country: "United States",
+    paymentMethod: "cod",
+  };
+
+  /** The F-QQ measured fetch-action multipart craft (+ the explicit cart cookie). */
+  async function postCheckoutAction(
+    actionId: string,
+    fields: Record<string, string>,
+    cartToken: string,
+  ): Promise<{ status: number; body: string }> {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(fields)) fd.set(`_1_${k}`, v);
+    fd.set("0", '[null,"$K1"]');
+    const res = await fetch(`${FWW_BASE}/checkout`, {
+      method: "POST",
+      headers: { "Next-Action": actionId, Cookie: `aurelia_cart=${cartToken}` },
+      body: fd,
+      signal: AbortSignal.timeout(15_000),
+    });
+    return { status: res.status, body: await res.text() };
+  }
+
+  test("a bag line above stock — or on a deactivated product — cannot place; the transaction unwinds whole (F-WW)", async () => {
+    test.setTimeout(60_000);
+
+    // The throwaway: a tmpdir holding a COPY of the suite DB + the
+    // standalone on :3210 with its own fresh limiter buckets.
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "aurelia-fww-"));
+    const copyPath = path.join(tmp, "copy.db");
+    copyFileSync(E2E_DB_FILE, copyPath);
+    const copyUrl = `file:${copyPath}`;
+
+    /** Read rows through Prisma on the COPY (dbRead's shape, copy-scoped). */
+    const copyRead = (jsonExpression: string): unknown => {
+      const script = `const {PrismaClient}=require("@prisma/client");const p=new PrismaClient({datasources:{db:{url:"${copyUrl}"}}});(${jsonExpression})(p).then(r=>{console.log("<<JSON>>"+JSON.stringify(r));return p.$disconnect()}).catch(e=>{console.error(e.message);process.exit(1)})`;
+      const res = spawnSync("node", ["-e", script], {
+        cwd: REPO,
+        env: { ...process.env, DATABASE_URL: copyUrl },
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf8",
+      });
+      if (res.status !== 0) throw new Error(`copyRead failed: ${res.stderr?.slice(0, 300)}`);
+      const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+      if (marker < 0) throw new Error(`copyRead produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+      return JSON.parse(res.stdout.slice(marker + "<<JSON>>".length).trim());
+    };
+
+    /** SQL fixture on the COPY (the established `prisma db execute` pattern). */
+    const sqlRunCopy = (sql: string): void => {
+      const file = path.join(tmp, "fixture.sql");
+      writeFileSync(file, sql);
+      try {
+        const res = spawnSync(
+          "npx",
+          ["prisma", "db", "execute", "--schema", path.join(REPO, "prisma", "schema.prisma"), "--file", file],
+          {
+            cwd: REPO,
+            env: { ...process.env, DATABASE_URL: copyUrl },
+            stdio: ["ignore", "pipe", "pipe"],
+            encoding: "utf8",
+          },
+        );
+        if (res.status !== 0) throw new Error(`sqlRunCopy failed: ${res.stderr?.slice(0, 300)}`);
+      } finally {
+        try { unlinkSync(file); } catch { /* already gone */ }
+      }
+    };
+
+    let child: ReturnType<typeof spawn> | null = null;
+    try {
+      child = spawn("node", [STANDALONE], {
+        cwd: REPO,
+        env: {
+          ...process.env,
+          PORT: String(FWW_PORT),
+          NODE_ENV: "production",
+          AUTH_SECRET: E2E_AUTH_SECRET,
+          DATABASE_URL: copyUrl,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stderrTail = "";
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderrTail = (stderrTail + chunk.toString("utf8")).slice(-800);
+      });
+
+      // Boot + listen (the load-bearing feasibility check).
+      let booted = false;
+      const deadline = Date.now() + 25_000;
+      while (Date.now() < deadline) {
+        try {
+          const probe = await fetch(`${FWW_BASE}/api/health`);
+          const text = await probe.text();
+          if (probe.status === 200 && text.includes('"db":true')) {
+            booted = true;
+            break;
+          }
+        } catch { /* not listening yet */ }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      expect(booted, `throwaway must boot against the copy; stderr: ${stderrTail.slice(0, 300)}`).toBe(true);
+
+      // The authoritative id set + placeOrderAction by exportedName (F-QQ's
+      // canary shape — a Next.js upgrade that reshapes the manifest fails
+      // HERE, loudly).
+      const manifest = JSON.parse(readFileSync(CHECKOUT_MANIFEST, "utf8")) as {
+        node?: Record<string, { exportedName?: string; filename?: string }>;
+      };
+      const entries = Object.entries(manifest.node ?? {});
+      expect(entries, `manifest at ${CHECKOUT_MANIFEST}`).toHaveLength(3);
+      for (const [id] of entries) expect(id).toMatch(/^[0-9a-f]{40,}$/);
+      const placeEntries = entries.filter(
+        ([, v]) => v?.exportedName === "placeOrderAction" && v?.filename === "src/lib/actions/checkout.ts",
+      );
+      expect(placeEntries, "exactly one placeOrderAction on the checkout route").toHaveLength(1);
+      const placeId = placeEntries[0][0];
+
+      // The fixture on the COPY: the deactivated product + the over-stock
+      // (active) product + the two guest carts with their lines (F-LL's
+      // INSERT shape — categoryId by scalar subquery; sizes '[]' keeps
+      // sizeAllowed unconstrained; the CartItem FK needs its parent Cart
+      // row first — the fixture-FK ordering lesson).
+      const row = (slug: string, isActive: boolean) =>
+        `INSERT INTO "Product" ("id","slug","name","brand","description","price","categoryId","subcategory","sortOrder","stock","isActive","createdAt","updatedAt") ` +
+        `VALUES ('${slug}','${slug}','FWW Guard ${slug}','E2E','F-WW guard fixture',100,` +
+        `(SELECT "id" FROM "Category" WHERE "slug"='accessories' LIMIT 1),'hats',2001,${STOCK},${isActive ? 1 : 0},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);`;
+      sqlRunCopy(
+        `DELETE FROM "CartItem" WHERE "id" IN ('${LINE_A_ID}','${LINE_B_ID}');\n` +
+          `DELETE FROM "Cart" WHERE "token" IN ('${CART_A_TOKEN}','${CART_B_TOKEN}');\n` +
+          `DELETE FROM "Product" WHERE "slug" IN ('${INACTIVE_SLUG}','${CLAMP_SLUG}');\n` +
+          row(INACTIVE_SLUG, false) + "\n" +
+          row(CLAMP_SLUG, true) + "\n" +
+          `INSERT INTO "Cart" ("id","token","userId","createdAt","updatedAt") VALUES ('fww-ca-${SUFFIX}','${CART_A_TOKEN}',NULL,datetime('now'),datetime('now'));\n` +
+          `INSERT INTO "Cart" ("id","token","userId","createdAt","updatedAt") VALUES ('fww-cb-${SUFFIX}','${CART_B_TOKEN}',NULL,datetime('now'),datetime('now'));\n` +
+          `INSERT INTO "CartItem" ("id","cartId","productId","size","quantity","createdAt","updatedAt") ` +
+          `VALUES ('${LINE_A_ID}','fww-ca-${SUFFIX}',(SELECT "id" FROM "Product" WHERE "slug"='${CLAMP_SLUG}'),'M',99,datetime('now'),datetime('now'));\n` +
+          `INSERT INTO "CartItem" ("id","cartId","productId","size","quantity","createdAt","updatedAt") ` +
+          `VALUES ('${LINE_B_ID}','fww-cb-${SUFFIX}',(SELECT "id" FROM "Product" WHERE "slug"='${INACTIVE_SLUG}'),'M',1,datetime('now'),datetime('now'));\n`,
+      );
+
+      // The captured baselines (server truth the wire cannot see).
+      const ordersBefore = (await copyRead(`(p)=>p.order.count()`)) as number;
+      const inactiveBefore = (await copyRead(
+        `(p)=>p.product.findUnique({where:{slug:"${INACTIVE_SLUG}"},select:{id:true,stock:true}})`,
+      )) as { id: string; stock: number } | null;
+      const clampBefore = (await copyRead(
+        `(p)=>p.product.findUnique({where:{slug:"${CLAMP_SLUG}"},select:{id:true,stock:true}})`,
+      )) as { id: string; stock: number } | null;
+      expect(inactiveBefore?.id, "the deactivated fixture must exist on the copy").toBeTruthy();
+      expect(clampBefore?.id, "the over-stock fixture must exist on the copy").toBeTruthy();
+
+      // --- craft A: the OVER-STOCK bag (the guard's stock term) -----------
+      // A qty-99 line against stock 5 — only a wire craft or a stale bag
+      // can carry one (the UI clamps; the F-13 lineage). The placement must
+      // answer the sold-out envelope and unwind WHOLE: zero orders, zero
+      // decrement, the bag line INTACT (the purge is success-only).
+      const craftA = await postCheckoutAction(placeId, COD_PAYLOAD, CART_A_TOKEN);
+      expect(craftA.status, "action errors are envelopes, never 5xx").toBe(200);
+      expect(craftA.body, "the over-stock bag answers the sold-out envelope").toContain(SOLD_OUT_MSG);
+      expect(craftA.body).toContain('"ok":false');
+      expect((await copyRead(`(p)=>p.order.count()`)) as number, "the rollback minted ZERO orders").toBe(ordersBefore);
+      const clampStockAfter = (await copyRead(
+        `(p)=>p.product.findUnique({where:{id:"${clampBefore!.id}"},select:{stock:true}})`,
+      )) as { stock: number };
+      expect(clampStockAfter.stock, "the rollback left the stock UNTOUCHED (no negative decrement)").toBe(clampBefore!.stock);
+      const lineAAfter = (await copyRead(
+        `(p)=>p.cartItem.findUnique({where:{id:"${LINE_A_ID}"},select:{quantity:true}})`,
+      )) as { quantity: number } | null;
+      expect(lineAAfter, "the rejected placement did NOT purge the bag (success-only purge)").toBeTruthy();
+
+      // --- craft B: the DEACTIVATED bag (the guard's isActive term) -------
+      // A lawful qty-1 line on a product the admin deactivated behind the
+      // bag — the F-TT class one layer deeper: the visibility decision must
+      // hold at the money path, not just the render + the add seam.
+      const craftB = await postCheckoutAction(placeId, COD_PAYLOAD, CART_B_TOKEN);
+      expect(craftB.status).toBe(200);
+      expect(craftB.body, "the deactivated bag answers the sold-out envelope").toContain(SOLD_OUT_MSG);
+      expect(craftB.body).toContain('"ok":false');
+      expect((await copyRead(`(p)=>p.order.count()`)) as number, "still ZERO orders after craft B").toBe(ordersBefore);
+      const inactiveStockAfter = (await copyRead(
+        `(p)=>p.product.findUnique({where:{id:"${inactiveBefore!.id}"},select:{stock:true}})`,
+      )) as { stock: number };
+      expect(inactiveStockAfter.stock, "the deactivated product's stock UNTOUCHED (the hidden line never sold)").toBe(inactiveBefore!.stock);
+      const lineBAfter = (await copyRead(
+        `(p)=>p.cartItem.findUnique({where:{id:"${LINE_B_ID}"},select:{quantity:true}})`,
+      )) as { quantity: number } | null;
+      expect(lineBAfter, "cart B's line intact").toBeTruthy();
+    } finally {
+      if (child) {
+        const force = setTimeout(() => child?.kill("SIGKILL"), 5_000);
+        const exited = new Promise<void>((resolve) => {
+          const c = child;
+          if (c) c.on("exit", () => resolve());
+        });
+        child.kill("SIGTERM");
+        await exited;
+        clearTimeout(force);
+      }
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
