@@ -7,9 +7,9 @@
 // absolute file: URL pinned explicitly so the helpers never depend on the
 // shell's env).
 import { spawnSync } from "node:child_process";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, request as playwrightRequest, test, type APIRequestContext } from "@playwright/test";
 
 const REPO = process.cwd();
 const SCHEMA = path.join(REPO, "prisma", "schema.prisma");
@@ -63,6 +63,28 @@ function deleteWishlistRow(token: string): void {
 }
 
 const loggedOut = { storageState: { cookies: [], origins: [] } };
+
+// F-TT (session-49) — the inactive-product wall's constants. The PDP route
+// manifest is the action-id source (the H-59 canary path); the probes post
+// to the control product's own PDP (any route whose manifest carries the
+// id — the H-59 wire fact).
+const PDP_MANIFEST_PATH = path.join(
+  REPO,
+  ".next/standalone/.next/server/app/(storefront)/product/[slug]/page/server-reference-manifest.json",
+);
+const BASE_URL = `http://localhost:${Number(process.env.E2E_PORT ?? 3100)}`;
+const CONTROL_SLUG = "leather-crossbody-bag"; // hearted by NO other wishlist spec (F-EE: wide-brim-felt-hat; F-GG: cashmere-overcoat)
+const FTT_SLUG = "ftt-inactive-e2e"; // idempotent per-run fixture slug; afterAll prefix-scoped DELETE
+const FTT_NAME = "F-TT Inactive Probe";
+const FTT_ID = "ftt-probe-e2e-inactive";
+// The pre-minted GUEST wishlist the control's toggle pair rides (the F-RR
+// explicit-Cookie wire fact: an explicit Cookie header authenticates the
+// action's cookies() reads — the APIRequestContext jar cannot carry the
+// production-`Secure` cookie over http, so the pair must NOT depend on it).
+const FTT_WL_ID = "ftt-wl-e2e-guest-id";
+const FTT_WL_TOKEN = "ftt-wl-e2e-guest-token";
+const NO_LONGER_MSG = "This piece is no longer available.";
+const INVALID_MSG = "Invalid wishlist request.";
 
 test.describe("wishlist", () => {
   test("adding from the PDP reflects on the wishlist page", async ({ page }) => {
@@ -389,5 +411,170 @@ test.describe("guest wishlist merge dedupe half (F-GG, session-36)", () => {
       // a failed run never leaks rows past its own context.
       if (guestToken) deleteWishlistRow(guestToken);
     }
+  });
+});
+
+// F-TT (session-49): the wishlist action's inactive-product wall. The
+// round's fresh audit found toggleWishlistAction's availability half missing
+// — the action read only { id: true } and accepted a DEACTIVATED product
+// (the admin's H-7 visibility toggle), minting a hidden row whose only
+// wire-visible trace is the header badge (the RAW set) counting it while
+// the wishlist page's isActive:true read renders the empty-state guidance —
+// the badge-vs-page disagreement, reproduced end-to-end in the plan probe.
+// The cart's exact mirror (cart.ts:57-60) guards !product ||
+// !product.isActive with the SAME message; this spec pins the same wall at
+// the wishlist seam. ONE request-level case (the H-59 JSON-arg wire shape);
+// ZERO logins, ZERO registers, ZERO limiter consumption (the wishlist
+// action carries none), ZERO writes to any row the case did not mint or
+// restore.
+test.describe("wishlist inactive-product wall (F-TT, session-49)", () => {
+  let inactiveId = "";
+  let controlId = "";
+
+  /** The H-59 measured JSON-arg shape. The optional explicit Cookie header
+   * rides the control's toggle-on/toggle-off pair on the PRE-MINTED guest
+   * wishlist (the F-RR wire fact) — never the projects' storageState. */
+  async function postToggle(
+    actionId: string,
+    productId: string,
+    cookie?: string,
+  ): Promise<{ status: number; body: string; ctx: APIRequestContext }> {
+    const context = await playwrightRequest.newContext();
+    const res = await context.post(`${BASE_URL}/product/${CONTROL_SLUG}`, {
+      headers: {
+        "Next-Action": actionId,
+        "Content-Type": "text/plain;charset=UTF-8",
+        ...(cookie ? { Cookie: `aurelia_wishlist=${cookie}` } : {}),
+      },
+      data: JSON.stringify([productId]),
+    });
+    return { status: res.status(), body: await res.text(), ctx: context };
+  }
+
+  test.beforeAll(() => {
+    // The inactive probe row (idempotent delete-then-insert; the seed ships
+    // ALL products active, so the fixture must MINT the hidden state; the
+    // afterAll prefix-scoped DELETE is mandatory — global-setup does NOT
+    // wipe Product).
+    sqlRun(
+      `DELETE FROM "Product" WHERE slug = '${FTT_SLUG}' OR id = '${FTT_ID}';\n` +
+        `INSERT INTO "Product" ("id","slug","name","brand","description","price","categoryId","subcategory","sortOrder","stock","isActive","createdAt","updatedAt") ` +
+        `SELECT '${FTT_ID}','${FTT_SLUG}','${FTT_NAME}','Probe Atelier',` +
+        `'A deactivated probe piece the wall must refuse.',19900, ` +
+        `(SELECT "id" FROM "Category" WHERE "slug"='accessories' LIMIT 1),'hats',999,0,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP;\n` +
+        `DELETE FROM "Wishlist" WHERE token = '${FTT_WL_TOKEN}' OR id = '${FTT_WL_ID}';\n` +
+        `INSERT INTO "Wishlist" ("id","token","userId","createdAt","updatedAt") ` +
+        `VALUES ('${FTT_WL_ID}','${FTT_WL_TOKEN}',NULL,datetime('now'),datetime('now'));`,
+    );
+    const inactive = JSON.parse(
+      dbRead(`(p)=>p.product.findUnique({where:{slug:"${FTT_SLUG}"},select:{id:true,isActive:true}})`),
+    ) as { id: string; isActive: boolean };
+    expect(inactive.id, "the inactive probe product mints").toBeTruthy();
+    expect(inactive.isActive, "the probe product is INACTIVE").toBe(false);
+    inactiveId = inactive.id;
+    const control = JSON.parse(
+      dbRead(`(p)=>p.product.findUnique({where:{slug:"${CONTROL_SLUG}"},select:{id:true}})`),
+    ) as { id: string };
+    expect(control.id, "the control product resolves").toBeTruthy();
+    controlId = control.id;
+  });
+
+  test.afterAll(() => {
+    // Belt-and-braces: the case's own asserts leave zero rows; a mid-case
+    // failure must never leak the fixture past its own context.
+    sqlRun(`DELETE FROM "WishlistItem" WHERE "wishlistId" = '${FTT_WL_ID}';`);
+    sqlRun(`DELETE FROM "WishlistItem" WHERE "productId" IN ('${inactiveId}', '${controlId}');`);
+    sqlRun(`DELETE FROM "Wishlist" WHERE token = '${FTT_WL_TOKEN}' OR id = '${FTT_WL_ID}';`);
+    sqlRun(`DELETE FROM "Product" WHERE slug = '${FTT_SLUG}' OR id = '${FTT_ID}';`);
+  });
+
+  test("an inactive product cannot be wishlisted over the wire; the active control still toggles (F-TT)", async () => {
+    test.setTimeout(60_000);
+
+    // --- the manifest canary (the build-shape gate; H-59 owns the exact-4) ---
+    const entries = Object.entries(
+      (JSON.parse(readFileSync(PDP_MANIFEST_PATH, "utf8")) as {
+        node: Record<string, { exportedName?: string }>;
+      }).node ?? {},
+    );
+    const toggleIds = entries.filter(([, v]) => v.exportedName === "toggleWishlistAction").map(([id]) => id);
+    expect(toggleIds, `manifest at ${PDP_MANIFEST_PATH}`).toHaveLength(1);
+    const actionId = toggleIds[0];
+
+    // The baseline: neither the inactive probe nor the control carries a
+    // wishlist row (the suite shares one DB — assert deltas, not absolutes).
+    const rowsBefore = JSON.parse(
+      dbRead(
+        `(p)=>p.wishlistItem.count({where:{productId:{in:["${inactiveId}","${controlId}"]}}})`,
+      ),
+    );
+    expect(rowsBefore).toBe(0);
+
+    // --- LB1 (the wall): the INACTIVE craft answers the availability
+    // envelope and mints NOTHING — no row, no guest-wishlist cookie.
+    const wallProbe = await postToggle(actionId, inactiveId);
+    expect(wallProbe.status, "action errors are envelopes, never 5xx").toBe(200);
+    expect(wallProbe.body).not.toContain("Internal Server Error");
+    expect(wallProbe.body, "the availability wall fired").toContain(NO_LONGER_MSG);
+    expect(wallProbe.body).toContain('"ok":false');
+    expect(wallProbe.body).not.toContain('"wishlisted":true');
+    await wallProbe.ctx.dispose();
+    // The denial writes NOTHING server-truth — the wall fires BEFORE
+    // getOrCreateWishlist, so a hidden piece's craft mints neither a row
+    // nor a wishlist (the load-bearing zero-write assertion; the guest-row
+    // count is a DELTA vs the pre-minted fixture).
+    const rowsAfterWall = JSON.parse(
+      dbRead(`(p)=>p.wishlistItem.count({where:{productId:"${inactiveId}"}})`),
+    );
+    expect(rowsAfterWall, "the hidden piece wrote zero rows").toBe(0);
+    const guestRowsAfterWall = JSON.parse(
+      dbRead(`(p)=>p.wishlist.count({where:{id:"${FTT_WL_ID}"}})`),
+    );
+    expect(guestRowsAfterWall, "the pre-minted fixture wishlist survives untouched").toBe(1);
+
+    // --- LB2 (the Zod half, self-contained): an empty id answers the schema
+    // gate before any lookup.
+    const zodProbe = await postToggle(actionId, "");
+    expect(zodProbe.status).toBe(200);
+    expect(zodProbe.body).toContain(INVALID_MSG);
+    await zodProbe.ctx.dispose();
+
+    // --- LB3 (the control — the false-positive guard): the SAME wire shape
+    // with the ACTIVE canonical id toggles ON (the row lands server-truth)
+    // and OFF (the toggle restores the pre-state), both crafts riding the
+    // PRE-MINTED guest wishlist through an EXPLICIT Cookie header (the
+    // F-RR wire fact — the per-wishlist toggle semantics need the same
+    // wishlist on both hops).
+    const onProbe = await postToggle(actionId, controlId, FTT_WL_TOKEN);
+    expect(onProbe.status).toBe(200);
+    expect(onProbe.body).toContain('"ok":true');
+    expect(onProbe.body).toContain('"wishlisted":true');
+    await onProbe.ctx.dispose();
+    const rowsAfterOn = JSON.parse(
+      dbRead(`(p)=>p.wishlistItem.count({where:{productId:"${controlId}"}})`),
+    );
+    expect(rowsAfterOn, "the lawful toggle WROTE the row (the wall is the only deny)").toBe(1);
+    const wlOwner = JSON.parse(
+      dbRead(`(p)=>p.wishlistItem.findFirst({where:{productId:"${controlId}"},select:{wishlistId:true}})`),
+    ) as { wishlistId: string };
+    expect(wlOwner.wishlistId, "the row landed on the pre-minted guest wishlist").toBe(FTT_WL_ID);
+
+    const offProbe = await postToggle(actionId, controlId, FTT_WL_TOKEN);
+    expect(offProbe.status).toBe(200);
+    expect(offProbe.body).toContain('"ok":true');
+    expect(offProbe.body).toContain('"wishlisted":false');
+    await offProbe.ctx.dispose();
+    const rowsAfterOff = JSON.parse(
+      dbRead(`(p)=>p.wishlistItem.count({where:{productId:"${controlId}"}})`),
+    );
+    expect(rowsAfterOff, "the toggle-off restored the pre-state").toBe(0);
+
+    // --- the final delta: zero rows for either product.
+    const rowsFinal = JSON.parse(
+      dbRead(
+        `(p)=>p.wishlistItem.count({where:{productId:{in:["${inactiveId}","${controlId}"]}}})`,
+      ),
+    );
+    expect(rowsFinal).toBe(0);
   });
 });

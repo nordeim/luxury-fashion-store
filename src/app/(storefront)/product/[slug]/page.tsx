@@ -18,7 +18,13 @@ interface ProductPageProps {
 export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
   const { slug } = await params;
   const product = await db.product.findUnique({ where: { slug } });
-  if (!product) return { title: "Product Not Found" };
+  // F-TT half B (session-49): the isActive guard — generateMetadata ran
+  // existence-only while the render 404s, streaming the hidden product's
+  // title/og:image/price metas in the flight payload over the 404 body (the
+  // browser-resolved DOM title measured leaking; the plan probe's raw-fetch
+  // read of the pre-stream shell was the false negative this case caught).
+  // Guard BOTH halves exactly like the render's notFound() below.
+  if (!product || !product.isActive) return { title: "Product Not Found" };
   // F-K2 (session-24): per-product share cards — the og/twitter image is the
   // piece's first catalog photograph (zero new assets; the CDN is already
   // allowed by images.remotePatterns). Inherits the root card as fallback

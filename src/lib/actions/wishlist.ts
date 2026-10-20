@@ -21,8 +21,19 @@ export async function toggleWishlistAction(productId: string): Promise<ActionRes
   if (!parsed.success) return fail("Invalid wishlist request.");
 
   const user = await getCurrentUser();
-  const product = await db.product.findUnique({ where: { id: parsed.data.productId }, select: { id: true } });
-  if (!product) return fail("This piece is no longer available.");
+  // F-TT (session-49): the availability wall's inactive half — the cart's
+  // exact mirror (cart.ts:57-60). The existence-only check let a
+  // DEACTIVATED product (the admin's H-7 visibility toggle) be wishlisted
+  // over the wire or from a stale PDP tab, minting a hidden row whose only
+  // wire-visible trace is the header badge (the RAW set) counting it while
+  // the wishlist page's isActive:true read renders the empty-state guidance
+  // — the badge-vs-page disagreement, reproduced end-to-end in the plan
+  // probe and pinned by the F-TT spec.
+  const product = await db.product.findUnique({
+    where: { id: parsed.data.productId },
+    select: { id: true, isActive: true },
+  });
+  if (!product || !product.isActive) return fail("This piece is no longer available.");
 
   const wishlistId = await getOrCreateWishlist(user?.id ?? null);
 
