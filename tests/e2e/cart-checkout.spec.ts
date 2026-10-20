@@ -1494,3 +1494,281 @@ test.describe("checkout stock/visibility guard (F-WW, session-52)", () => {
     }
   });
 });
+
+// F-XX (session-53) — the transient-state sweeper's RUNTIME seam. The pure
+// plan (buildSweepPlan's cutoffs + the userId:null ownership discriminator)
+// and the P2021 classifier are unit-pinned (sweeper.test.ts) — but the
+// EXECUTOR (runSweep's three deleteMany calls, sweeper.ts:51-62) and the
+// instrumentation WIRING (register()'s unawaited boot call,
+// instrumentation.ts:36-46) were wire-blind, and the sharpest audit fact:
+// in the E2E harness the boot sweep P2021-soft-skips EVERY run (the :3100
+// webServer boots against the schema-less db/e2e.db before global-setup
+// pushes the schema) and the hourly interval never fires inside a suite
+// run — runSweep's happy path had NEVER successfully deleted a row in any
+// test. F-NN (session-43) documented the blind spot and carried it; this
+// gate closes it. The throwaway-copy pattern DISSOLVES the boot race: the
+// copy already has the schema, so the spawned server's register() runs the
+// sweep against fixtures minted on the copy BEFORE spawn (the F-XX-specific
+// order — the F-QQ/F-WW cribs mint post-boot for per-request action reads;
+// the sweeper reads ONCE at boot).
+//
+// THE ROUND'S HARNESS DISCOVERY (the plan probe's first run): Prisma 6's
+// SQLite connector stores DateTime as INTEGER EPOCH MILLISECONDS — raw-SQL
+// datetime()/strftime() write TEXT, and SQLite's cross-storage-class
+// ordering puts INTEGER < TEXT ALWAYS, so `updatedAt < <integer-param>` is
+// FALSE for every TEXT-stored row: a datetime()-written fixture is
+// INVISIBLE to the sweeper's where. Every fixture datetime below writes
+// strftime('%s','now',±N)*1000 — integer ms, Prisma's own format.
+//
+// Budget: ZERO limiter consumption anywhere (the only fetch is the
+// unrate-limited /api/health boot probe); zero logins, zero registers, no
+// storageState ride (the case is pure Node — identical on both device
+// projects); db/e2e.db is read once at copyFileSync and NEVER written.
+test.describe("transient-state sweeper (F-XX, session-53)", () => {
+  const FXX_PORT = 3211;
+  const FXX_BASE = `http://localhost:${FXX_PORT}`;
+  const REPO = process.cwd();
+  const STANDALONE = path.join(REPO, ".next", "standalone", "server.js");
+  const E2E_DB_FILE = path.join(REPO, "db", "e2e.db");
+
+  const SUFFIX = randomBytes(6).toString("hex");
+  // The member-cart fixture's owner: a run-unique FIXTURE USER, never james —
+  // Cart.userId is @unique, and in the FULL-file run james already owns a
+  // cart by the time this describe executes (the earlier cart cases mint
+  // it), so a james-owned fixture cart P2002s on the copy (the first
+  // full-file run caught exactly this). The fixture user is never logged in
+  // — the hash is inert, but minted in the suite's real offline-scrypt shape.
+  const FXX_USER_ID = `fxx-u-${SUFFIX}`;
+  const FXX_USER_EMAIL = `fxx-member-${SUFFIX}@example.com`;
+  const FXX_SALT = randomBytes(16).toString("hex");
+  const FXX_HASH = scryptSync("FxxProbe1234!", FXX_SALT, 64).toString("hex");
+  const SESSION_PAST_ID = `fxx-sx-${SUFFIX}`;
+  const SESSION_FUTURE_ID = `fxx-sf-${SUFFIX}`;
+  const SESSION_PAST_TOKEN = `fxx-stp-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const SESSION_FUTURE_TOKEN = `fxx-stf-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const CART_IDLE_ID = `fxx-ci-${SUFFIX}`;
+  const CART_RECENT_ID = `fxx-cr-${SUFFIX}`;
+  const CART_USER_ID = `fxx-cu-${SUFFIX}`;
+  const CART_IDLE_TOKEN = `fxx-ti-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const CART_RECENT_TOKEN = `fxx-tr-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const CART_USER_TOKEN = `fxx-tu-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const ITEM_IDLE_ID = `fxx-ii-${SUFFIX}`;
+  const ITEM_RECENT_ID = `fxx-ir-${SUFFIX}`;
+  const WISHLIST_IDLE_ID = `fxx-li-${SUFFIX}`;
+  const WISHLIST_RECENT_ID = `fxx-lr-${SUFFIX}`;
+  const WISHLIST_IDLE_TOKEN = `fxx-wi-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const WISHLIST_RECENT_TOKEN = `fxx-wr-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const WISH_ITEM_IDLE_ID = `fxx-ji-${SUFFIX}`;
+
+  test("the boot sweep deletes expired sessions + idle guest rows, never member state; the cascades hold (F-XX)", async () => {
+    test.setTimeout(75_000);
+
+    // The throwaway: a tmpdir COPY of the suite DB + the standalone on :3211.
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "aurelia-fxx-"));
+    const copyPath = path.join(tmp, "copy.db");
+    copyFileSync(E2E_DB_FILE, copyPath);
+    const copyUrl = `file:${copyPath}`;
+
+    /** Read rows through Prisma on the COPY (dbRead's shape, copy-scoped). */
+    const copyRead = (jsonExpression: string): unknown => {
+      const script = `const {PrismaClient}=require("@prisma/client");const p=new PrismaClient({datasources:{db:{url:"${copyUrl}"}}});(${jsonExpression})(p).then(r=>{console.log("<<JSON>>"+JSON.stringify(r));return p.$disconnect()}).catch(e=>{console.error(e.message);process.exit(1)})`;
+      const res = spawnSync("node", ["-e", script], {
+        cwd: REPO,
+        env: { ...process.env, DATABASE_URL: copyUrl },
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf8",
+      });
+      if (res.status !== 0) throw new Error(`copyRead failed: ${res.stderr?.slice(0, 300)}`);
+      const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+      if (marker < 0) throw new Error(`copyRead produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+      return JSON.parse(res.stdout.slice(marker + "<<JSON>>".length).trim());
+    };
+
+    /** SQL fixture on the COPY (the established `prisma db execute` pattern). */
+    const sqlRunCopy = (sql: string): void => {
+      const file = path.join(tmp, "fixture.sql");
+      writeFileSync(file, sql);
+      try {
+        const res = spawnSync(
+          "npx",
+          ["prisma", "db", "execute", "--schema", path.join(REPO, "prisma", "schema.prisma"), "--file", file],
+          {
+            cwd: REPO,
+            env: { ...process.env, DATABASE_URL: copyUrl },
+            stdio: ["ignore", "pipe", "pipe"],
+            encoding: "utf8",
+          },
+        );
+        if (res.status !== 0) throw new Error(`sqlRunCopy failed: ${(res.stderr ?? "").slice(-2500)}`);
+      } finally {
+        try { unlinkSync(file); } catch { /* already gone */ }
+      }
+    };
+
+    let child: ReturnType<typeof spawn> | null = null;
+    try {
+      // The fixtures, minted BEFORE spawn — the boot sweep must FIND them at
+      // register() time. Datetimes are INTEGER EPOCH MS (the harness
+      // discovery; see the describe header). The 40-day idle window is
+      // strictly beyond GUEST_CART_IDLE_MS (30 days).
+      sqlRunCopy(
+        `DELETE FROM "WishlistItem" WHERE "id" = '${WISH_ITEM_IDLE_ID}';\n` +
+          `DELETE FROM "Wishlist" WHERE "id" IN ('${WISHLIST_IDLE_ID}','${WISHLIST_RECENT_ID}');\n` +
+          `DELETE FROM "CartItem" WHERE "id" IN ('${ITEM_IDLE_ID}','${ITEM_RECENT_ID}');\n` +
+          `DELETE FROM "Cart" WHERE "id" IN ('${CART_IDLE_ID}','${CART_RECENT_ID}','${CART_USER_ID}');\n` +
+          `DELETE FROM "Session" WHERE "id" IN ('${SESSION_PAST_ID}','${SESSION_FUTURE_ID}');\n` +
+          `DELETE FROM "User" WHERE "email" = '${FXX_USER_EMAIL}';\n` +
+          `INSERT INTO "User" ("id","email","passwordHash","name","role","createdAt","updatedAt") VALUES ` +
+          `('${FXX_USER_ID}','${FXX_USER_EMAIL}','s1$${FXX_SALT}$${FXX_HASH}','FXX Member Probe','user',(strftime('%s','now')*1000),(strftime('%s','now')*1000));\n` +
+          `INSERT INTO "Session" ("id","token","userId","expiresAt","createdAt") VALUES ` +
+          `('${SESSION_PAST_ID}','${SESSION_PAST_TOKEN}',(SELECT "id" FROM "User" WHERE "email"='james@example.com'),(strftime('%s','now','-1 day')*1000),(strftime('%s','now')*1000));\n` +
+          `INSERT INTO "Session" ("id","token","userId","expiresAt","createdAt") VALUES ` +
+          `('${SESSION_FUTURE_ID}','${SESSION_FUTURE_TOKEN}',(SELECT "id" FROM "User" WHERE "email"='james@example.com'),(strftime('%s','now','+1 day')*1000),(strftime('%s','now')*1000));\n` +
+          `INSERT INTO "Cart" ("id","token","userId","createdAt","updatedAt") VALUES ` +
+          `('${CART_IDLE_ID}','${CART_IDLE_TOKEN}',NULL,(strftime('%s','now','-40 days')*1000),(strftime('%s','now','-40 days')*1000));\n` +
+          `INSERT INTO "Cart" ("id","token","userId","createdAt","updatedAt") VALUES ` +
+          `('${CART_RECENT_ID}','${CART_RECENT_TOKEN}',NULL,(strftime('%s','now')*1000),(strftime('%s','now')*1000));\n` +
+          `INSERT INTO "Cart" ("id","token","userId","createdAt","updatedAt") VALUES ` +
+          `('${CART_USER_ID}','${CART_USER_TOKEN}','${FXX_USER_ID}',(strftime('%s','now','-40 days')*1000),(strftime('%s','now','-40 days')*1000));\n` +
+          `INSERT INTO "CartItem" ("id","cartId","productId","size","quantity","createdAt","updatedAt") VALUES ` +
+          `('${ITEM_IDLE_ID}','${CART_IDLE_ID}',(SELECT "id" FROM "Product" WHERE "slug"='leather-crossbody-bag'),'M',1,(strftime('%s','now','-40 days')*1000),(strftime('%s','now','-40 days')*1000));\n` +
+          `INSERT INTO "CartItem" ("id","cartId","productId","size","quantity","createdAt","updatedAt") VALUES ` +
+          `('${ITEM_RECENT_ID}','${CART_RECENT_ID}',(SELECT "id" FROM "Product" WHERE "slug"='leather-crossbody-bag'),'M',2,(strftime('%s','now')*1000),(strftime('%s','now')*1000));\n` +
+          `INSERT INTO "Wishlist" ("id","token","userId","createdAt","updatedAt") VALUES ` +
+          `('${WISHLIST_IDLE_ID}','${WISHLIST_IDLE_TOKEN}',NULL,(strftime('%s','now','-40 days')*1000),(strftime('%s','now','-40 days')*1000));\n` +
+          `INSERT INTO "Wishlist" ("id","token","userId","createdAt","updatedAt") VALUES ` +
+          `('${WISHLIST_RECENT_ID}','${WISHLIST_RECENT_TOKEN}',NULL,(strftime('%s','now')*1000),(strftime('%s','now')*1000));\n` +
+          `INSERT INTO "WishlistItem" ("id","wishlistId","productId","createdAt") VALUES ` +
+          `('${WISH_ITEM_IDLE_ID}','${WISHLIST_IDLE_ID}',(SELECT "id" FROM "Product" WHERE "slug"='leather-crossbody-bag'),(strftime('%s','now','-40 days')*1000));\n`,
+      );
+
+      // Pre-spawn sanity: every fixture present on the copy (the captured-
+      // baselines pattern — the sweep's matrix reads fixture-scoped rows).
+      const fixtures = (await Promise.all([
+        copyRead(`(p)=>p.user.findUnique({where:{email:"${FXX_USER_EMAIL}"},select:{id:true}})`),
+        copyRead(`(p)=>p.session.findUnique({where:{id:"${SESSION_PAST_ID}"},select:{id:true}})`),
+        copyRead(`(p)=>p.session.findUnique({where:{id:"${SESSION_FUTURE_ID}"},select:{id:true}})`),
+        copyRead(`(p)=>p.cart.findUnique({where:{token:"${CART_IDLE_TOKEN}"},select:{id:true}})`),
+        copyRead(`(p)=>p.cart.findUnique({where:{token:"${CART_RECENT_TOKEN}"},select:{id:true}})`),
+        copyRead(`(p)=>p.cart.findUnique({where:{token:"${CART_USER_TOKEN}"},select:{id:true}})`),
+        copyRead(`(p)=>p.cartItem.findUnique({where:{id:"${ITEM_IDLE_ID}"},select:{id:true}})`),
+        copyRead(`(p)=>p.wishlist.findUnique({where:{token:"${WISHLIST_IDLE_TOKEN}"},select:{id:true}})`),
+        copyRead(`(p)=>p.wishlist.findUnique({where:{token:"${WISHLIST_RECENT_TOKEN}"},select:{id:true}})`),
+      ])) as unknown[];
+      expect(fixtures.every((r) => r !== null), "all 9 fixtures minted on the copy pre-spawn").toBe(true);
+
+      // Spawn: register() fires the boot sweep (unawaited) the moment the
+      // server process starts — the happy path the harness could never run.
+      child = spawn("node", [STANDALONE], {
+        cwd: REPO,
+        env: {
+          ...process.env,
+          PORT: String(FXX_PORT),
+          NODE_ENV: "production",
+          AUTH_SECRET: E2E_AUTH_SECRET,
+          DATABASE_URL: copyUrl,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stderrTail = "";
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderrTail = (stderrTail + chunk.toString("utf8")).slice(-800);
+      });
+
+      // Boot + listen (the load-bearing feasibility check).
+      let booted = false;
+      const bootDeadline = Date.now() + 25_000;
+      while (Date.now() < bootDeadline) {
+        try {
+          const probe = await fetch(`${FXX_BASE}/api/health`);
+          const text = await probe.text();
+          if (probe.status === 200 && text.includes('"db":true')) {
+            booted = true;
+            break;
+          }
+        } catch { /* not listening yet */ }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      expect(booted, `throwaway must boot against the copy; stderr: ${stderrTail.slice(0, 300)}`).toBe(true);
+
+      // THE SWEEP POLL — the deterministic join for the unawaited boot call:
+      // poll the copy until the idle guest cart row is GONE (bounded
+      // deadline). A never-firing sweep (the boot-wiring drop, the cart
+      // deleteMany drop) fails HERE with the poll's own message.
+      const sweepDeadline = Date.now() + 25_000;
+      let idleCartGone = false;
+      while (Date.now() < sweepDeadline) {
+        const idleCart = (await copyRead(
+          `(p)=>p.cart.findUnique({where:{token:"${CART_IDLE_TOKEN}"},select:{id:true}})`,
+        )) as { id: string } | null;
+        if (idleCart === null) {
+          idleCartGone = true;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      expect(idleCartGone, "the boot sweep deleted the 40-day-idle GUEST cart (the runtime seam fired)").toBe(true);
+
+      // --- the matrix (fixture-scoped; the keep halves are the catastrophic
+      // guards: a wrong where-term eats MEMBER state, a dropped deleteMany
+      // lingers garbage forever).
+      const sessionPast = (await copyRead(
+        `(p)=>p.session.findUnique({where:{id:"${SESSION_PAST_ID}"},select:{id:true}})`,
+      )) as { id: string } | null;
+      const sessionFuture = (await copyRead(
+        `(p)=>p.session.findUnique({where:{id:"${SESSION_FUTURE_ID}"},select:{id:true}})`,
+      )) as { id: string } | null;
+      expect(sessionPast, "the PAST-expiry session is swept (the ADR-006 bulk half)").toBeNull();
+      expect(sessionFuture, "the FUTURE-expiry session SURVIVES").not.toBeNull();
+
+      const itemIdle = (await copyRead(
+        `(p)=>p.cartItem.findUnique({where:{id:"${ITEM_IDLE_ID}"},select:{id:true}})`,
+      )) as { id: string } | null;
+      const itemRecent = (await copyRead(
+        `(p)=>p.cartItem.findUnique({where:{id:"${ITEM_RECENT_ID}"},select:{id:true}})`,
+      )) as { id: string } | null;
+      expect(itemIdle, "the idle cart's CartItem cascaded away (no orphan lines)").toBeNull();
+      expect(itemRecent, "the recent cart's item SURVIVES with its parent").not.toBeNull();
+
+      const cartRecent = (await copyRead(
+        `(p)=>p.cart.findUnique({where:{token:"${CART_RECENT_TOKEN}"},select:{id:true}})`,
+      )) as { id: string } | null;
+      const cartUser = (await copyRead(
+        `(p)=>p.cart.findUnique({where:{token:"${CART_USER_TOKEN}"},select:{id:true}})`,
+      )) as { id: string } | null;
+      expect(cartRecent, "the RECENT guest cart SURVIVES (inside the 30-day window)").not.toBeNull();
+      expect(cartUser, "the MEMBER-OWNED 40-day-idle cart SURVIVES (the userId:null ownership discriminator on the wire — a member's saved bag is never garbage)").not.toBeNull();
+
+      const wishlistIdle = (await copyRead(
+        `(p)=>p.wishlist.findUnique({where:{token:"${WISHLIST_IDLE_TOKEN}"},select:{id:true}})`,
+      )) as { id: string } | null;
+      const wishlistItemIdle = (await copyRead(
+        `(p)=>p.wishlistItem.findUnique({where:{id:"${WISH_ITEM_IDLE_ID}"},select:{id:true}})`,
+      )) as { id: string } | null;
+      const wishlistRecent = (await copyRead(
+        `(p)=>p.wishlist.findUnique({where:{token:"${WISHLIST_RECENT_TOKEN}"},select:{id:true}})`,
+      )) as { id: string } | null;
+      expect(wishlistIdle, "the idle guest wishlist is swept").toBeNull();
+      expect(wishlistItemIdle, "its WishlistItem cascaded away").toBeNull();
+      expect(wishlistRecent, "the RECENT guest wishlist SURVIVES").not.toBeNull();
+
+      // The sweep never broke the server.
+      const healthAfter = await fetch(`${FXX_BASE}/api/health`);
+      const healthAfterBody = await healthAfter.text();
+      expect(healthAfter.status, "health still 200 post-sweep").toBe(200);
+      expect(healthAfterBody, "health still db:true post-sweep").toContain('"db":true');
+    } finally {
+      if (child) {
+        const force = setTimeout(() => child?.kill("SIGKILL"), 5_000);
+        const exited = new Promise<void>((resolve) => {
+          const c = child;
+          if (c) c.on("exit", () => resolve());
+        });
+        child.kill("SIGTERM");
+        await exited;
+        clearTimeout(force);
+      }
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
