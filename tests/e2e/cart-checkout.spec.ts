@@ -26,8 +26,8 @@
 import { execSync, spawn, spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createHmac } from "node:crypto";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHmac, randomBytes, scryptSync } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { E2E_AUTH_SECRET } from "./e2e-secrets";
 
@@ -893,5 +893,343 @@ test.describe("checkout limiter floor (F-QQ, session-46)", () => {
       }
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+// F-VV (session-51) — the guest-cart merge's contract halves, wire-blind
+// since session-3 (F-13). mergeGuestCartIntoUser (src/lib/cart.ts:154-192)
+// was gated ONLY on its survival half through the LOGIN door (H-8 above — a
+// UI flow whose james cart is EMPTY pre-merge): the overlap dedupe split
+// (the findUnique + update/create branches at :180/:185-192), the
+// quantity-max union (:184), the F-13 stock clamp (:184), and the REGISTER
+// door's merge call (auth.ts:123) had ZERO coverage — every half can drop
+// with every existing case green. The sibling wishlist merge owns BOTH auth
+// doors (F-EE) + its dedupe half (F-GG); the cart seam's halves are this
+// gate's contract:
+//
+//   1. the DEDUPE/UNION half: a guest line whose (productId, size) already
+//      exists on the user cart merges to exactly ONE row at the MAX
+//      quantity — a dropped split (blind create) P2002s inside the merge's
+//      $transaction and 500s the LOGIN ITSELF (the crash class F-GG named
+//      for the wishlist); a guest-wins drop silently SHRINKS the user's
+//      larger line; a keep-existing drop silently drops the guest's larger
+//      quantity — both directions of the union contract, pinned.
+//   2. the STOCK-CLAMP half (F-13's own fix, "merged quantities clamped
+//      against product stock"): a stale guest line above stock (the H-39
+//      shape — the UI clamps, so only a stock-dropped-behind-it bag can
+//      carry one) must land clamped; a dropped clamp resurrects the
+//      session-3 oversell invariant silently.
+//   3. The REGISTER door: the merge call inside registerAction is entirely
+//      ungated — a dropped call silently loses the guest bag at register.
+//
+// The wire shape (the F-PP measured no-JS progressive-enhancement POST —
+// $ACTION_REF_1/$ACTION_1:0/$ACTION_1:1/$ACTION_KEY + the form fields; the
+// login + register manifests expose the SAME 2 ids via the shared
+// auth-form, discriminated by envelope). The guest cart rides an EXPLICIT
+// Cookie header (aurelia_cart=<token>) on plain Node fetch — the F-RR/F-UU
+// wire fact: Playwright contexts ride storageState / the jar drops the
+// production-Secure cookie over http; plain fetch attaches nothing.
+//
+// Budget ledger (the limiter arithmetic, first-hand from src/): the login
+// key is login:<ip>:<email> — the fixture email is run-unique, a FRESH
+// bucket per worker (2 slots); the register key is register:<ip> (per-IP,
+// shared) — F-GG's 2 + this gate's 2 = 4/10 per run. ZERO canonical-bucket
+// consumption, ZERO UI logins, ZERO storageState pollution. The crafts
+// mint fixture Session rows (createSession) — afterAll deletes them by
+// email; global-setup's transient wipe is the belt-and-braces.
+test.describe("guest cart merge contract (F-VV, session-51)", () => {
+  const REPO = process.cwd();
+  const E2E_DB_URL = `file:${path.join(REPO, "db", "e2e.db")}`;
+  const SQL_SCRATCH = path.join(REPO, "tests", "e2e", ".f-vv-fixture.sql");
+  const LOGIN_MANIFEST = path.join(
+    REPO,
+    ".next/standalone/.next/server/app/(auth)/login/page/server-reference-manifest.json",
+  );
+  // A plain Node fetch carries NO baseURL — mirror the config's port
+  // resolution (E2E_PORT honored, :3100 default) for the absolute URL.
+  const BASE_URL = `http://localhost:${Number(process.env.E2E_PORT ?? 3100)}`;
+
+  const SUFFIX = randomBytes(6).toString("hex");
+  const FIXTURE_EMAIL = `fvv-${SUFFIX}@example.com`;
+  const FIXTURE_PASS = "FvvGate1234!";
+  const REG_EMAIL = `fvv-reg-${SUFFIX}@example.com`;
+  const USER_ID = `fvv-user-${SUFFIX}`;
+  const USER_CART_ID = `fvv-ucart-${SUFFIX}`;
+  const GUEST_CART_1 = `fvv-gcart1-${SUFFIX}`;
+  const GUEST_CART_2 = `fvv-gcart2-${SUFFIX}`;
+  const GUEST_TOKEN_1 = `fvv-gtoken1-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const GUEST_TOKEN_2 = `fvv-gtoken2-${SUFFIX}-${randomBytes(24).toString("hex")}`;
+  const UA_ID = `fvv-ua-${SUFFIX}`; // user's overlap-A line (overcoat-S, qty 2)
+  const UB_ID = `fvv-ub-${SUFFIX}`; // user's overlap-B line (turtleneck-M, qty 1)
+  const GA_ID = `fvv-ga-${SUFFIX}`; // guest overlap-A (qty 1)
+  const GB_ID = `fvv-gb-${SUFFIX}`; // guest overlap-B (qty 3)
+  const GC_ID = `fvv-gc-${SUFFIX}`; // guest clamp line (qty stock+5)
+  const GS_ID = `fvv-gs-${SUFFIX}`; // guest survival line (qty 1)
+  const G2C_ID = `fvv-g2c-${SUFFIX}`; // register-door guest clamp line
+  const G2S_ID = `fvv-g2s-${SUFFIX}`; // register-door guest survival line
+
+  const ENUMERATION_MSG = "Incorrect email or password.";
+  const ZOD_COPY = "Check the highlighted fields";
+
+  // Runtime-resolved fixture state (beforeAll); the merge contract reads
+  // against the captured stock — never hardcoded (checkout flows decrement
+  // gown/hat stocks during the run; the fixture products carry no cart-flow
+  // writes: cashmere-overcoat is wishlist-only, the tote + turtleneck are
+  // untouched by every UI spec).
+  let toteStock = 0;
+
+  /** SQL fixture helper — the established `prisma db execute` pattern (H-2/M-1). */
+  function sqlRun(sql: string): void {
+    writeFileSync(SQL_SCRATCH, sql);
+    try {
+      const res = spawnSync(
+        "npx",
+        ["prisma", "db", "execute", "--schema", path.join(REPO, "prisma", "schema.prisma"), "--file", SQL_SCRATCH],
+        {
+          cwd: REPO,
+          env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+        },
+      );
+      if (res.status !== 0) throw new Error(`sqlRun failed: ${res.stderr?.slice(0, 300)}`);
+    } finally {
+      try { unlinkSync(SQL_SCRATCH); } catch { /* already gone */ }
+    }
+  }
+
+  /** Read rows through Prisma on the E2E DB (the F-II/F-KK/F-MM helper's shape). */
+  function dbRead(jsonExpression: string): unknown {
+    const script = `const {PrismaClient}=require("@prisma/client");const p=new PrismaClient({datasources:{db:{url:"${E2E_DB_URL}"}}});(${jsonExpression})(p).then(r=>{console.log("<<JSON>>"+JSON.stringify(r));return p.$disconnect()}).catch(e=>{console.error(e.message);process.exit(1)})`;
+    const res = spawnSync("node", ["-e", script], {
+      cwd: REPO,
+      env: { ...process.env, DATABASE_URL: E2E_DB_URL },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    if (res.status !== 0) throw new Error(`dbRead failed: ${res.stderr?.slice(0, 300)}`);
+    const marker = (res.stdout ?? "").indexOf("<<JSON>>");
+    if (marker < 0) throw new Error(`dbRead produced no JSON: ${(res.stdout ?? "").slice(0, 200)}`);
+    return JSON.parse(res.stdout.slice(marker + "<<JSON>>".length).trim());
+  }
+
+  /** The no-JS progressive-enhancement POST (the F-PP measured shape). The
+   * guest cart rides an EXPLICIT Cookie header — never a jar. */
+  async function postForm(
+    pagePath: string,
+    actionId: string,
+    fields: Record<string, string>,
+    cookie?: string,
+  ): Promise<{ status: number; body: string; setCookies: string[] }> {
+    const fd = new FormData();
+    fd.set("$ACTION_REF_1", "");
+    fd.set("$ACTION_1:0", JSON.stringify({ id: actionId, bound: "$@1" }));
+    fd.set("$ACTION_1:1", "[null]");
+    fd.set("$ACTION_KEY", `kfvv${process.pid.toString(16)}${Date.now().toString(16)}`);
+    for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+    const res = await fetch(`${BASE_URL}${pagePath}`, {
+      method: "POST",
+      body: fd,
+      headers: cookie ? { Cookie: `aurelia_cart=${cookie}` } : {},
+      signal: AbortSignal.timeout(20_000),
+      redirect: "manual",
+    });
+    return { status: res.status, body: await res.text(), setCookies: res.headers.getSetCookie?.() ?? [] };
+  }
+
+  test.beforeAll(() => {
+    // The fixture products (runtime-resolved ids; the stock captured — the
+    // clamp expectation is dynamic by design).
+    const overcoat = dbRead(`(p)=>p.product.findFirst({where:{slug:"cashmere-overcoat"},select:{id:true}})`) as { id: string } | null;
+    const turtleneck = dbRead(`(p)=>p.product.findFirst({where:{slug:"merino-wool-turtleneck"},select:{id:true}})`) as { id: string } | null;
+    const tote = dbRead(`(p)=>p.product.findFirst({where:{slug:"structured-tote-bag"},select:{id:true,stock:true}})`) as { id: string; stock: number } | null;
+    expect(overcoat, "the fixture products must exist").toBeTruthy();
+    expect(turtleneck).toBeTruthy();
+    expect(tote).toBeTruthy();
+    toteStock = tote!.stock;
+    expect(toteStock, "the clamp fixture needs stock ≥ 1").toBeGreaterThan(0);
+
+    // The fixture user (offline scrypt — the F-II replication of
+    // hashPassword: s1$salt$hex, keylen 64) + the user cart with the two
+    // PRE-EXISTING overlap lines + the two guest carts (userId NULL,
+    // run-unique tokens). Idempotent delete-then-insert; Cart.userId is
+    // UNIQUE but the fixture users are fresh (never minted elsewhere).
+    const salt = randomBytes(16).toString("hex");
+    const hash = scryptSync(FIXTURE_PASS, salt, 64).toString("hex");
+    sqlRun(
+      `DELETE FROM "CartItem" WHERE "id" LIKE 'fvv-%-${SUFFIX}';\n` +
+        `DELETE FROM "Cart" WHERE "id" LIKE 'fvv-%-${SUFFIX}';\n` +
+        `DELETE FROM "Session" WHERE "userId" IN (SELECT id FROM "User" WHERE email IN ('${FIXTURE_EMAIL}','${REG_EMAIL}'));\n` +
+        `DELETE FROM "User" WHERE email IN ('${FIXTURE_EMAIL}','${REG_EMAIL}');\n` +
+        `INSERT INTO "User" ("id","email","passwordHash","name","role","createdAt","updatedAt") VALUES ` +
+        `('${USER_ID}','${FIXTURE_EMAIL}','s1$${salt}$${hash}','FVV Fixture','user',datetime('now'),datetime('now'));\n` +
+        `INSERT INTO "Cart" ("id","token","userId","createdAt","updatedAt") VALUES ` +
+        `('${USER_CART_ID}','fvv-utoken-${SUFFIX}','${USER_ID}',datetime('now'),datetime('now')),\n` +
+        `('${GUEST_CART_1}','${GUEST_TOKEN_1}',NULL,datetime('now'),datetime('now')),\n` +
+        `('${GUEST_CART_2}','${GUEST_TOKEN_2}',NULL,datetime('now'),datetime('now'));\n` +
+        `INSERT INTO "CartItem" ("id","cartId","productId","size","quantity","createdAt","updatedAt") VALUES ` +
+        `('${UA_ID}','${USER_CART_ID}','${overcoat!.id}','S',2,datetime('now'),datetime('now')),\n` +
+        `('${UB_ID}','${USER_CART_ID}','${turtleneck!.id}','M',1,datetime('now'),datetime('now')),\n` +
+        `('${GA_ID}','${GUEST_CART_1}','${overcoat!.id}','S',1,datetime('now'),datetime('now')),\n` +
+        `('${GB_ID}','${GUEST_CART_1}','${turtleneck!.id}','M',3,datetime('now'),datetime('now')),\n` +
+        `('${GC_ID}','${GUEST_CART_1}','${tote!.id}','One Size',${toteStock + 5},datetime('now'),datetime('now')),\n` +
+        `('${GS_ID}','${GUEST_CART_1}','${turtleneck!.id}','L',1,datetime('now'),datetime('now')),\n` +
+        `('${G2C_ID}','${GUEST_CART_2}','${tote!.id}','One Size',${toteStock + 5},datetime('now'),datetime('now')),\n` +
+        `('${G2S_ID}','${GUEST_CART_2}','${turtleneck!.id}','L',1,datetime('now'),datetime('now'));`,
+    );
+  });
+
+  test.afterAll(() => {
+    // Id-scoped idempotent cleanup (the F-UU contract: delete only what this
+    // worker minted — the guest carts by id, the fixture users by email with
+    // their cascades, every fixture line by id). global-setup's transient
+    // wipe is the belt-and-braces.
+    sqlRun(
+      `DELETE FROM "CartItem" WHERE "id" LIKE 'fvv-%-${SUFFIX}';\n` +
+        `DELETE FROM "Cart" WHERE "id" LIKE 'fvv-%-${SUFFIX}';\n` +
+        `DELETE FROM "Session" WHERE "userId" IN (SELECT id FROM "User" WHERE email IN ('${FIXTURE_EMAIL}','${REG_EMAIL}'));\n` +
+        `DELETE FROM "User" WHERE email IN ('${FIXTURE_EMAIL}','${REG_EMAIL}');`,
+    );
+  });
+
+  test("the login-door merge unions, dedupes, and clamps the guest bag (F-VV)", async () => {
+    test.setTimeout(60_000);
+
+    // The manifest canary (the build-shape gate): the shared auth-form's
+    // exactly 2 ids, IDENTICAL across the login + register pages.
+    const manifest = JSON.parse(readFileSync(LOGIN_MANIFEST, "utf8")) as { node?: Record<string, unknown> };
+    const ids = Object.keys(manifest.node ?? {});
+    expect(ids, `manifest at ${LOGIN_MANIFEST}`).toHaveLength(2);
+    for (const id of ids) expect(id).toMatch(/^[0-9a-f]{40,}$/);
+
+    // Discriminate the login/register ids by envelope (the F-PP method):
+    // the unknown-email login shape answers the anti-enumeration envelope;
+    // the same shape against the sibling fails registerSchema's Zod gate
+    // (confirmPassword absent) BEFORE its limiter — zero register-bucket
+    // consumption. The probe email is worker-unique: a FRESH login bucket.
+    const PROBE_EMAIL = `fvv-unknown-${SUFFIX}@example.com`;
+    let loginId: string | null = null;
+    let registerId: string | null = null;
+    for (const id of ids) {
+      const r = await postForm("/login", id, { email: PROBE_EMAIL, password: "WrongPassword1234!" });
+      if (r.body.includes(ENUMERATION_MSG)) loginId = id;
+      else if (r.body.includes(ZOD_COPY)) registerId = id;
+    }
+    expect(loginId, "one id answers the anti-enumeration envelope").not.toBeNull();
+    expect(registerId, "the sibling answers registerSchema's Zod copy").not.toBeNull();
+
+    // THE LOGIN CRAFT: the fixture user + the guest cart cookie. The merge
+    // fires INSIDE loginAction (auth.ts:44), after createSession.
+    const loginRes = await postForm("/login", loginId!, { email: FIXTURE_EMAIL, password: FIXTURE_PASS }, GUEST_TOKEN_1);
+    // The craft succeeded: a sub-400 answer (the measured 303 redirect), no
+    // anti-enumeration envelope on the response AND the session row minted
+    // server-truth (the wire alone proves nothing). A P2002-class merge
+    // crash (the dedupe-split drop) redds at the STATUS line — the login
+    // itself 500s mid-flow, exactly the harm class.
+    expect(loginRes.status, "the login craft answered sub-400 (no merge crash)").toBeLessThan(400);
+    expect(loginRes.body, "the login craft succeeded (no envelope)").not.toContain(ENUMERATION_MSG);
+    const sessions = dbRead(`(p)=>p.session.count({where:{user:{email:"${FIXTURE_EMAIL}"}}})`) as number;
+    expect(sessions, "the session row minted server-truth").toBeGreaterThanOrEqual(1);
+
+    // LOAD-BEARING 1 — the DEDUPE/UNION half (both directions):
+    // overlap-A (user 2 / guest 1) → exactly ONE row at the MAX quantity 2.
+    // A guest-wins drop redds HERE (quantity 1 observed); a blind-create
+    // drop P2002s inside the merge tx and redds at the craft-success
+    // assertion above.
+    const mergedA = dbRead(
+      `(p)=>p.cartItem.findMany({where:{cart:{id:"${USER_CART_ID}"},product:{slug:"cashmere-overcoat"},size:"S"},select:{quantity:true}})`,
+    ) as { quantity: number }[];
+    expect(mergedA, "overlap-A: exactly one row (the dedupe split held)").toHaveLength(1);
+    expect(mergedA[0]?.quantity, "overlap-A merged at the MAX quantity (user-larger union)").toBe(2);
+
+    // overlap-B (user 1 / guest 3) → exactly ONE row at 3: the keep-existing
+    // mirror direction of the SAME union contract.
+    const mergedB = dbRead(
+      `(p)=>p.cartItem.findMany({where:{cart:{id:"${USER_CART_ID}"},product:{slug:"merino-wool-turtleneck"},size:"M"},select:{quantity:true}})`,
+    ) as { quantity: number }[];
+    expect(mergedB, "overlap-B: exactly one row").toHaveLength(1);
+    expect(mergedB[0]?.quantity, "overlap-B merged at the MAX quantity (guest-larger union)").toBe(3);
+
+    // LOAD-BEARING 2 — the STOCK-CLAMP half (F-13's own fix): the stale
+    // guest line above stock lands clamped to the captured stock.
+    const mergedClamp = dbRead(
+      `(p)=>p.cartItem.findMany({where:{cart:{id:"${USER_CART_ID}"},product:{slug:"structured-tote-bag"},size:"One Size"},select:{quantity:true}})`,
+    ) as { quantity: number }[];
+    expect(mergedClamp, "the clamp line landed").toHaveLength(1);
+    expect(mergedClamp[0]?.quantity, `the merged quantity clamped to stock ${toteStock} (F-13)`).toBe(toteStock);
+
+    // The SURVIVAL half (H-8's contract, now on the fixture user): a fresh
+    // guest line lands at its own quantity.
+    const mergedSurvival = dbRead(
+      `(p)=>p.cartItem.findMany({where:{cart:{id:"${USER_CART_ID}"},product:{slug:"merino-wool-turtleneck"},size:"L"},select:{quantity:true}})`,
+    ) as { quantity: number }[];
+    expect(mergedSurvival, "the survival line landed").toHaveLength(1);
+    expect(mergedSurvival[0]?.quantity).toBe(1);
+
+    // The guest cart row is GONE (merged + deleted — the merge's own delete).
+    const guest1 = dbRead(`(p)=>p.cart.findUnique({where:{id:"${GUEST_CART_1}"},select:{id:true}})`);
+    expect(guest1, "the guest cart row deleted by the merge").toBeNull();
+
+    // The cookie-clear half (G-5's wire-visible shape): the response clears
+    // the guest cart cookie (Set-Cookie carries aurelia_cart=).
+    expect(loginRes.setCookies.some((c) => c.includes("aurelia_cart=")),
+      "the cart cookie cleared on the wire").toBe(true);
+  });
+
+  test("the register-door merge clamps and lands the guest bag (F-VV)", async () => {
+    test.setTimeout(60_000);
+
+    // The register id (discriminated in case 1's shape — the SAME manifest
+    // pair; re-read defensively so the case is self-contained).
+    const manifest = JSON.parse(readFileSync(LOGIN_MANIFEST, "utf8")) as { node?: Record<string, unknown> };
+    const ids = Object.keys(manifest.node ?? {});
+    expect(ids).toHaveLength(2);
+    const PROBE_EMAIL = `fvv-unknown2-${SUFFIX}@example.com`;
+    let registerId: string | null = null;
+    for (const id of ids) {
+      const r = await postForm("/login", id, { email: PROBE_EMAIL, password: "WrongPassword1234!" });
+      if (r.body.includes(ZOD_COPY)) registerId = id;
+    }
+    expect(registerId, "the register id discriminated by the Zod envelope").not.toBeNull();
+
+    // THE REGISTER CRAFT: a fresh email (registerAction creates the user +
+    // session + merge — auth.ts:123). The guest cart rides the cookie; the
+    // user cart is created BY the merge's upsert (the register door can
+    // never carry a pre-existing user cart — the overlap half is inherently
+    // absent on this door, documented).
+    const regRes = await postForm("/register", registerId!, {
+      email: REG_EMAIL,
+      name: "FVV Register",
+      password: FIXTURE_PASS,
+      confirmPassword: FIXTURE_PASS,
+    }, GUEST_TOKEN_2);
+    expect(regRes.status, "the register craft answered sub-400").toBeLessThan(400);
+    expect(regRes.body, "the register craft succeeded").not.toContain("already exists");
+
+    // The user minted + the merge upserted the user cart.
+    const regUser = dbRead(`(p)=>p.user.findUnique({where:{email:"${REG_EMAIL}"},select:{id:true}})`) as { id: string } | null;
+    expect(regUser, "the register craft minted the user").toBeTruthy();
+
+    // LOAD-BEARING — the register door's merge state (a dropped
+    // mergeGuestCartIntoUser call redds HERE: no user cart, guest survives).
+    const regCart = dbRead(
+      `(p)=>p.cart.findUnique({where:{userId:"${regUser!.id}"},select:{id:true,items:{select:{quantity:true,size:true,product:{select:{slug:true}}}}}})`,
+    ) as { id: string; items: { quantity: number; size: string; product: { slug: string } }[] } | null;
+    expect(regCart, "the merge upserted the user's cart").toBeTruthy();
+    expect(regCart!.items.length, "exactly the clamp + survival lines landed").toBe(2);
+
+    const clamp = regCart!.items.filter((i) => i.product.slug === "structured-tote-bag");
+    expect(clamp, "the register door's clamp line landed").toHaveLength(1);
+    expect(clamp[0]?.quantity, `the register door clamped to stock ${toteStock} (F-13)`).toBe(toteStock);
+
+    const survival = regCart!.items.filter((i) => i.product.slug === "merino-wool-turtleneck" && i.size === "L");
+    expect(survival, "the register door's survival line landed").toHaveLength(1);
+    expect(survival[0]?.quantity).toBe(1);
+
+    // The guest cart row is GONE; the cookie cleared on the wire.
+    const guest2 = dbRead(`(p)=>p.cart.findUnique({where:{id:"${GUEST_CART_2}"},select:{id:true}})`);
+    expect(guest2, "the register door deleted the guest cart row").toBeNull();
+    expect(regRes.setCookies.some((c) => c.includes("aurelia_cart=")),
+      "the register door cleared the cart cookie on the wire").toBe(true);
   });
 });
